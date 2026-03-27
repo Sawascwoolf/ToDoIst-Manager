@@ -166,27 +166,39 @@ async function connect() {
     err.classList.add('hidden');
     if (!token) { err.textContent = 'Bitte Token eingeben.'; err.classList.remove('hidden'); return; }
 
+    const mainErr = document.getElementById('main-error');
+    mainErr.classList.add('hidden');
+
     try {
         const r = await fetch(`${API_BASE}/projects`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!r.ok) {
-            err.textContent = r.status === 401 || r.status === 403
+            const body = await r.text().catch(() => '');
+            const msg = r.status === 401 || r.status === 403
                 ? `Token ungültig (HTTP ${r.status}).`
-                : `API-Fehler HTTP ${r.status}`;
-            err.classList.remove('hidden'); return;
+                : r.status === 410
+                ? `API v1 nicht erreichbar (HTTP 410). API-Version hat sich möglicherweise geändert.`
+                : `API-Fehler HTTP ${r.status}: ${body.substring(0, 150)}`;
+            err.textContent = msg; err.classList.remove('hidden');
+            mainErr.textContent = msg; mainErr.classList.remove('hidden');
+            return;
         }
         const data = await r.json();
         const projects = data.results || data;
         const sel = document.getElementById('project-select');
         sel.innerHTML = '<option value="">Projekt wählen...</option>';
         projects.forEach(p => { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o); });
-        sel.classList.remove('hidden');
+        sel.disabled = false;
         localStorage.setItem('todoist_token', token);
         showToast(`${projects.length} Projekte geladen.`, 'success');
-        // Auto-close sidebar after successful connect
         if (document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
     } catch (e) {
-        err.textContent = e instanceof TypeError ? 'Netzwerkfehler. Internet/Adblocker prüfen.' : e.message;
-        err.classList.remove('hidden');
+        const detail = e.message || String(e);
+        const msg = e instanceof TypeError
+            ? `Netzwerkfehler: ${detail}. Prüfe Internetverbindung, Adblocker oder ob api.todoist.com erreichbar ist.`
+            : `Fehler: ${detail}`;
+        err.textContent = msg; err.classList.remove('hidden');
+        mainErr.textContent = msg; mainErr.classList.remove('hidden');
+        console.error('Connect error:', e);
     }
 }
 
