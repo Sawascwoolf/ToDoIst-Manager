@@ -1,27 +1,24 @@
 const API_BASE = 'https://api.todoist.com/api/v1';
 
 let token = '';
-let allTasks = [];
-let filteredTasks = [];
-let sections = {};
-let collaborators = {}; // userId -> name
+let allTasks = [];       // all tasks from cache (open + completed combined)
+let filteredTasks = [];  // after filters applied
+let sections = {};       // id -> name
+let collaborators = {};  // userId -> name
 let selectedIds = new Set();
 let sortField = 'content';
 let sortAsc = true;
+let collapsedSections = new Set();
 
 // ── Task Cache ──
-// Cache per project: { projectId: { open: [...], completed: [...], sections: {...}, ts: Date } }
 const taskCache = {};
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 5 * 60 * 1000;
 
-function getCached(projectId, statusFilter) {
+function getCached(projectId) {
     const entry = taskCache[projectId];
     if (!entry) return null;
     if (Date.now() - entry.ts > CACHE_TTL) return null;
-    if (statusFilter === 'open' && entry.open) return entry;
-    if (statusFilter === 'completed' && entry.completed) return entry;
-    if (statusFilter === 'all' && entry.open && entry.completed) return entry;
-    return null;
+    return entry;
 }
 
 function invalidateCache(projectId) {
@@ -31,12 +28,8 @@ function invalidateCache(projectId) {
 // ── API Helpers ──
 
 async function api(method, path, body = null) {
-    const headers = {
-        'Authorization': `Bearer ${token}`,
-    };
-    if (body) {
-        headers['Content-Type'] = 'application/json';
-    }
+    const headers = { 'Authorization': `Bearer ${token}` };
+    if (body) headers['Content-Type'] = 'application/json';
     const opts = { method, headers };
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(`${API_BASE}${path}`, opts);
@@ -48,43 +41,32 @@ async function api(method, path, body = null) {
     return res.json();
 }
 
-// Fetch all pages for paginated cursor-based endpoints
 async function apiPaginated(path) {
     let allResults = [];
     let cursor = null;
-    const separator = path.includes('?') ? '&' : '?';
-
     do {
-        let url = cursor ? `${path}${separator}cursor=${cursor}` : path;
-        // Request maximum page size if not already specified
+        let url = cursor
+            ? path + (path.includes('?') ? '&' : '?') + 'cursor=' + cursor
+            : path;
         if (!url.includes('limit=')) {
             url += (url.includes('?') ? '&' : '?') + 'limit=200';
         }
         const data = await api('GET', url);
-
-        if (Array.isArray(data)) {
-            allResults = allResults.concat(data);
-            break;
-        }
-
+        if (Array.isArray(data)) { allResults = allResults.concat(data); break; }
         allResults = allResults.concat(data.results || []);
         cursor = data.nextCursor || null;
     } while (cursor);
-
     return allResults;
 }
 
-// Fetch all completed tasks with offset-based pagination
 async function fetchAllCompletedTasks(projectId) {
     let allItems = [];
     let offset = 0;
     const pageSize = 200;
-
     do {
         const data = await api('GET', `/tasks/completed?projectId=${projectId}&limit=${pageSize}&offset=${offset}`);
         const items = data.items || data.results || [];
         allItems = allItems.concat(items);
-        // If we got fewer than pageSize, we've reached the end
         if (items.length < pageSize) break;
         offset += items.length;
     } while (true);
@@ -98,46 +80,35 @@ async function fetchAllCompletedTasks(projectId) {
         due: null,
         sectionId: item.sectionId || item.section_id || null,
         parentId: item.parentId || item.parent_id || null,
+        responsibleUid: item.responsibleUid || null,
         _status: 'completed',
     }));
 }
 
-// Run promises in parallel with concurrency limit
+// ── Parallel execution with concurrency ──
 async function parallelLimit(tasks, limit, onProgress) {
-    let completed = 0;
-    let failed = 0;
-    const results = [];
+    let completed = 0, failed = 0;
     let index = 0;
-
     async function runNext() {
         while (index < tasks.length) {
             const i = index++;
-            try {
-                results[i] = await tasks[i]();
-                completed++;
-            } catch (e) {
-                results[i] = e;
-                failed++;
-            }
+            try { await tasks[i](); completed++; }
+            catch (e) { failed++; }
             if (onProgress) await onProgress(completed + failed, tasks.length, completed, failed);
         }
     }
-
-    const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => runNext());
-    await Promise.all(workers);
+    await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, () => runNext()));
     return { completed, failed };
 }
 
 // ── Progress Bar ──
-
 async function showProgress(current, total, label) {
-    let bar = document.getElementById('progress-bar');
+    const bar = document.getElementById('progress-bar');
     if (!bar) return;
     bar.classList.remove('hidden');
     const pct = Math.round((current / total) * 100);
     bar.querySelector('.progress-fill').style.width = pct + '%';
     bar.querySelector('.progress-text').textContent = `${label}: ${current} / ${total}`;
-    // Yield to browser so it can repaint
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 }
 
@@ -146,8 +117,18 @@ function hideProgress() {
     if (bar) bar.classList.add('hidden');
 }
 
-// ── Connect ──
+// ── Toggle Filter Buttons ──
+function toggleFilter(btn) {
+    btn.classList.toggle('active');
+    applyFilters();
+}
 
+function getActiveValues(containerId) {
+    const btns = document.querySelectorAll(`#${containerId} .toggle-btn.active`);
+    return [...btns].map(b => b.dataset.value);
+}
+
+// ── Connect ──
 async function connect() {
     token = document.getElementById('token-input').value.trim();
     const errEl = document.getElementById('auth-error');
@@ -168,9 +149,9 @@ async function connect() {
         if (!res.ok) {
             const body = await res.text().catch(() => '');
             if (res.status === 401 || res.status === 403) {
-                errEl.textContent = `Authentifizierung fehlgeschlagen (HTTP ${res.status}). Der Token ist ungültig oder abgelaufen.`;
+                errEl.textContent = `Authentifizierung fehlgeschlagen (HTTP ${res.status}). Token ungültig oder abgelaufen.`;
             } else if (res.status === 410) {
-                errEl.textContent = `API-Endpunkt nicht mehr verfügbar (HTTP 410). Die API-Version wurde möglicherweise geändert.`;
+                errEl.textContent = `API-Endpunkt nicht mehr verfügbar (HTTP 410).`;
             } else {
                 errEl.textContent = `API-Fehler HTTP ${res.status}: ${body.substring(0, 200)}`;
             }
@@ -194,17 +175,16 @@ async function connect() {
         showToast('Verbunden! Bitte Projekt auswählen.', 'success');
     } catch (e) {
         if (e instanceof TypeError) {
-            errEl.textContent = 'Netzwerkfehler: Keine Verbindung zu api.todoist.com möglich. Prüfe deine Internetverbindung oder ob ein Adblocker/Firewall die Anfrage blockiert.';
+            errEl.textContent = 'Netzwerkfehler: Keine Verbindung möglich. Internetverbindung/Adblocker prüfen.';
         } else {
-            errEl.textContent = `Unerwarteter Fehler: ${e.message}`;
+            errEl.textContent = `Fehler: ${e.message}`;
         }
         errEl.classList.remove('hidden');
-        console.error('Todoist connect error:', e);
+        console.error('Connect error:', e);
     }
 }
 
 // ── Load Tasks ──
-
 async function loadTasks(forceRefresh = false) {
     const projectId = document.getElementById('project-select').value;
     if (!projectId) return;
@@ -212,24 +192,19 @@ async function loadTasks(forceRefresh = false) {
     const filterSection = document.getElementById('filter-section');
     const taskSection = document.getElementById('task-section');
     const loading = document.getElementById('loading');
-    const statusFilter = document.getElementById('filter-status').value;
 
-    // Check cache first
     if (!forceRefresh) {
-        const cached = getCached(projectId, statusFilter);
+        const cached = getCached(projectId);
         if (cached) {
             sections = cached.sections;
-            collaborators = cached.collaborators || {};
-            let tasks = [];
-            if (statusFilter === 'open') tasks = cached.open;
-            else if (statusFilter === 'completed') tasks = cached.completed;
-            else tasks = [...(cached.open || []), ...(cached.completed || [])];
-            allTasks = tasks;
+            collaborators = cached.collaborators;
+            allTasks = [...cached.open, ...cached.completed];
             filterSection.classList.remove('hidden');
             taskSection.classList.remove('hidden');
+            populateAssigneeToggles();
             populateLabelFilter(allTasks);
             applyFilters();
-            showToast(`${allTasks.length} Aufgaben (aus Cache).`, 'success');
+            showToast(`${allTasks.length} Aufgaben (Cache).`, 'success');
             return;
         }
     }
@@ -241,7 +216,6 @@ async function loadTasks(forceRefresh = false) {
     document.getElementById('no-tasks').classList.add('hidden');
 
     try {
-        // Always load both open + completed so we can cache everything
         const [openTasks, completedTasks, sectionList, collabList] = await Promise.all([
             apiPaginated(`/tasks?projectId=${projectId}`),
             fetchAllCompletedTasks(projectId),
@@ -257,9 +231,13 @@ async function loadTasks(forceRefresh = false) {
 
         const collabs = {};
         collabList.forEach(c => { collabs[c.id] = c.name || c.email || c.id; });
+        // Also extract assignees from tasks themselves if collaborators endpoint failed
+        [...openTasks, ...completedTasks].forEach(t => {
+            const uid = t.responsibleUid || t.assigneeId || t.assignee_id;
+            if (uid && !collabs[uid]) collabs[uid] = uid;
+        });
         collaborators = collabs;
 
-        // Store in cache
         taskCache[projectId] = {
             open: openTasks,
             completed: completedTasks,
@@ -268,23 +246,68 @@ async function loadTasks(forceRefresh = false) {
             ts: Date.now(),
         };
 
-        // Apply status filter from cached data
-        if (statusFilter === 'open') allTasks = openTasks;
-        else if (statusFilter === 'completed') allTasks = completedTasks;
-        else allTasks = [...openTasks, ...completedTasks];
-
+        allTasks = [...openTasks, ...completedTasks];
+        populateAssigneeToggles();
         populateLabelFilter(allTasks);
         applyFilters();
-        showToast(`${openTasks.length} offene + ${completedTasks.length} erledigte Aufgaben geladen.`, 'success');
+        showToast(`${openTasks.length} offen + ${completedTasks.length} erledigt geladen.`, 'success');
     } catch (e) {
-        showToast('Fehler beim Laden: ' + e.message, 'error');
+        showToast('Fehler: ' + e.message, 'error');
     } finally {
         loading.classList.add('hidden');
     }
 }
 
-// ── Hierarchy ──
+// ── Populate dynamic filters ──
+function populateAssigneeToggles() {
+    const container = document.getElementById('filter-assignee-toggles');
+    const names = Object.entries(collaborators);
+    if (names.length === 0) {
+        container.innerHTML = '<button class="toggle-btn active" data-value="__all__" onclick="toggleFilter(this)">Alle</button>';
+        return;
+    }
+    container.innerHTML = '';
+    // "Alle" toggle
+    const allBtn = document.createElement('button');
+    allBtn.className = 'toggle-btn active';
+    allBtn.dataset.value = '__all__';
+    allBtn.textContent = 'Alle';
+    allBtn.onclick = function() { toggleFilter(this); };
+    container.appendChild(allBtn);
+    // "Keine" toggle (unassigned)
+    const noneBtn = document.createElement('button');
+    noneBtn.className = 'toggle-btn active';
+    noneBtn.dataset.value = '__none__';
+    noneBtn.textContent = 'Ohne';
+    noneBtn.onclick = function() { toggleFilter(this); };
+    container.appendChild(noneBtn);
 
+    names.forEach(([id, name]) => {
+        const btn = document.createElement('button');
+        btn.className = 'toggle-btn active';
+        btn.dataset.value = id;
+        btn.textContent = name;
+        btn.onclick = function() { toggleFilter(this); };
+        container.appendChild(btn);
+    });
+}
+
+function populateLabelFilter(tasks) {
+    const labelSet = new Set();
+    tasks.forEach(t => (t.labels || []).forEach(l => labelSet.add(l)));
+    const select = document.getElementById('filter-label');
+    const current = select.value;
+    select.innerHTML = '<option value="">Alle</option>';
+    [...labelSet].sort().forEach(l => {
+        const opt = document.createElement('option');
+        opt.value = l;
+        opt.textContent = l;
+        select.appendChild(opt);
+    });
+    select.value = current;
+}
+
+// ── Hierarchy ──
 function buildHierarchy(tasks) {
     const taskMap = new Map();
     tasks.forEach(t => taskMap.set(t.id, t));
@@ -302,10 +325,8 @@ function buildHierarchy(tasks) {
     });
 
     const roots = tasks.filter(t => t._depth === 0);
-    const children = tasks.filter(t => t._depth > 0);
-
     const childrenByParent = new Map();
-    children.forEach(c => {
+    tasks.filter(t => t._depth > 0).forEach(c => {
         const pid = c.parentId || c.parent_id;
         if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
         childrenByParent.get(pid).push(c);
@@ -314,74 +335,50 @@ function buildHierarchy(tasks) {
     const result = [];
     function addWithChildren(task) {
         result.push(task);
-        const kids = childrenByParent.get(task.id) || [];
-        kids.forEach(kid => addWithChildren(kid));
+        (childrenByParent.get(task.id) || []).forEach(kid => addWithChildren(kid));
     }
     roots.forEach(r => addWithChildren(r));
 
-    children.forEach(c => {
-        if (!result.includes(c)) {
-            c._depth = 0;
-            result.push(c);
-        }
+    // Orphans
+    tasks.forEach(t => {
+        if (!result.includes(t)) { t._depth = 0; result.push(t); }
     });
-
     return result;
 }
 
 // ── Filters ──
-
-function populateLabelFilter(tasks) {
-    const labelSet = new Set();
-    tasks.forEach(t => (t.labels || []).forEach(l => labelSet.add(l)));
-    const select = document.getElementById('filter-label');
-    const current = select.value;
-    select.innerHTML = '<option value="">Alle</option>';
-    [...labelSet].sort().forEach(l => {
-        const opt = document.createElement('option');
-        opt.value = l;
-        opt.textContent = l;
-        select.appendChild(opt);
-    });
-    select.value = current;
-}
-
 function applyFilters() {
     const search = document.getElementById('filter-search').value.toLowerCase();
-    const priority = document.getElementById('filter-priority').value;
     const label = document.getElementById('filter-label').value;
-    const due = document.getElementById('filter-due').value;
-    const statusFilter = document.getElementById('filter-status').value;
-
-    // Re-slice from cache if status changed
-    const projectId = document.getElementById('project-select').value;
-    const cached = projectId ? taskCache[projectId] : null;
-    if (cached) {
-        if (statusFilter === 'open') allTasks = cached.open || [];
-        else if (statusFilter === 'completed') allTasks = cached.completed || [];
-        else allTasks = [...(cached.open || []), ...(cached.completed || [])];
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const weekEnd = new Date(today);
-    weekEnd.setDate(weekEnd.getDate() + 7);
+    const activeStatuses = getActiveValues('filter-status-toggles');
+    const activePriorities = getActiveValues('filter-priority-toggles');
+    const activeAssignees = getActiveValues('filter-assignee-toggles');
 
     filteredTasks = allTasks.filter(t => {
+        // Search
         if (search && !t.content.toLowerCase().includes(search) &&
             !(t.description || '').toLowerCase().includes(search)) return false;
 
-        if (priority && String(t.priority) !== priority) return false;
+        // Status
+        if (activeStatuses.length > 0) {
+            const isCompleted = t._status === 'completed' || t.is_completed || t.checked;
+            const taskStatus = isCompleted ? 'completed' : 'open';
+            if (!activeStatuses.includes(taskStatus)) return false;
+        }
 
+        // Priority
+        if (activePriorities.length > 0 && activePriorities.length < 4) {
+            if (!activePriorities.includes(String(t.priority))) return false;
+        }
+
+        // Label
         if (label && !(t.labels || []).includes(label)) return false;
 
-        if (due) {
-            const dueDate = t.due ? new Date(t.due.date) : null;
-            if (due === 'nodue' && dueDate) return false;
-            if (due === 'overdue' && (!dueDate || dueDate >= today)) return false;
-            if (due === 'today' && (!dueDate || dueDate.toDateString() !== today.toDateString())) return false;
-            if (due === 'week' && (!dueDate || dueDate < today || dueDate > weekEnd)) return false;
+        // Assignee
+        if (activeAssignees.length > 0 && !activeAssignees.includes('__all__')) {
+            const uid = t.responsibleUid || t.assigneeId || t.assignee_id;
+            if (!uid && !activeAssignees.includes('__none__')) return false;
+            if (uid && !activeAssignees.includes(uid)) return false;
         }
 
         return true;
@@ -396,23 +393,14 @@ function applyFilters() {
 }
 
 // ── Sorting ──
-
 function sortBy(field) {
-    if (sortField === field) {
-        sortAsc = !sortAsc;
-    } else {
-        sortField = field;
-        sortAsc = true;
-    }
+    if (sortField === field) sortAsc = !sortAsc;
+    else { sortField = field; sortAsc = true; }
 
-    document.querySelectorAll('th.sortable').forEach(th => {
-        th.classList.remove('sort-asc', 'sort-desc');
-    });
+    document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
     const sortableThs = document.querySelectorAll('th.sortable');
-    const idx = ['content', 'priority', 'due', 'assignee', 'section'].indexOf(field);
-    if (idx >= 0 && sortableThs[idx]) {
-        sortableThs[idx].classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
-    }
+    const idx = ['content', 'priority', 'due', 'assignee'].indexOf(field);
+    if (idx >= 0 && sortableThs[idx]) sortableThs[idx].classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
 
     sortTasks();
     filteredTasks = buildHierarchy(filteredTasks);
@@ -423,29 +411,11 @@ function sortTasks() {
     filteredTasks.sort((a, b) => {
         let va, vb;
         switch (sortField) {
-            case 'content':
-                va = a.content.toLowerCase();
-                vb = b.content.toLowerCase();
-                break;
-            case 'priority':
-                va = a.priority;
-                vb = b.priority;
-                return sortAsc ? vb - va : va - vb;
-            case 'due':
-                va = a.due ? a.due.date : 'z';
-                vb = b.due ? b.due.date : 'z';
-                break;
-            case 'assignee':
-                va = getAssigneeName(a).toLowerCase();
-                vb = getAssigneeName(b).toLowerCase();
-                break;
-            case 'section':
-                va = sections[a.sectionId] || sections[a.section_id] || '';
-                vb = sections[b.sectionId] || sections[b.section_id] || '';
-                break;
-            default:
-                va = '';
-                vb = '';
+            case 'content': va = a.content.toLowerCase(); vb = b.content.toLowerCase(); break;
+            case 'priority': va = a.priority; vb = b.priority; return sortAsc ? vb - va : va - vb;
+            case 'due': va = a.due ? a.due.date : 'z'; vb = b.due ? b.due.date : 'z'; break;
+            case 'assignee': va = getAssigneeName(a).toLowerCase(); vb = getAssigneeName(b).toLowerCase(); break;
+            default: va = ''; vb = '';
         }
         if (va < vb) return sortAsc ? -1 : 1;
         if (va > vb) return sortAsc ? 1 : -1;
@@ -454,11 +424,15 @@ function sortTasks() {
 }
 
 // ── Rendering ──
-
 const PRIORITY_LABELS = { 4: 'P1', 3: 'P2', 2: 'P3', 1: 'P4' };
 
+function getSectionId(task) {
+    return task.sectionId || task.section_id || null;
+}
+
 function getSectionName(task) {
-    return sections[task.sectionId] || sections[task.section_id] || '';
+    const sid = getSectionId(task);
+    return sid ? (sections[sid] || '') : '';
 }
 
 function getAssigneeName(task) {
@@ -471,73 +445,151 @@ function renderTable() {
     const tbody = document.getElementById('task-body');
     const noTasks = document.getElementById('no-tasks');
     const taskCount = document.getElementById('task-count');
+    const sectionControls = document.getElementById('section-controls');
 
     if (filteredTasks.length === 0) {
         tbody.innerHTML = '';
         noTasks.classList.remove('hidden');
         taskCount.textContent = '';
+        sectionControls.classList.add('hidden');
         return;
     }
 
     noTasks.classList.add('hidden');
 
+    // Group by section
+    const groups = [];
+    const groupMap = new Map();
+    filteredTasks.forEach(t => {
+        const sid = getSectionId(t) || '__none__';
+        if (!groupMap.has(sid)) {
+            const g = { id: sid, name: sid === '__none__' ? '(Ohne Abschnitt)' : (sections[sid] || 'Unbekannt'), tasks: [] };
+            groups.push(g);
+            groupMap.set(sid, g);
+        }
+        groupMap.get(sid).tasks.push(t);
+    });
+
+    const hasSections = groups.length > 1 || groups[0]?.id !== '__none__';
+    sectionControls.classList.toggle('hidden', !hasSections);
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    tbody.innerHTML = filteredTasks.map(t => {
-        const checked = selectedIds.has(t.id) ? 'checked' : '';
-        const selectedClass = selectedIds.has(t.id) ? 'selected' : '';
-        const depth = t._depth || 0;
-        const indent = depth > 0 ? `padding-left: ${depth * 24 + 12}px` : '';
-
-        const desc = t.description
-            ? `<span class="task-description">${escapeHtml(t.description.substring(0, 80))}${t.description.length > 80 ? '...' : ''}</span>`
-            : '';
-
-        const hierarchyPrefix = depth > 0 ? '<span class="subtask-indicator">&#x2514; </span>' : '';
-
-        const priorityBadge = `<span class="priority-badge priority-${t.priority}">${PRIORITY_LABELS[t.priority] || 'P4'}</span>`;
-
-        let dueHtml = '—';
-        if (t.due) {
-            const dueDate = new Date(t.due.date);
-            const isOverdue = dueDate < today;
-            const cls = isOverdue ? 'due-date overdue' : 'due-date';
-            dueHtml = `<span class="${cls}">${formatDate(t.due.date)}${isOverdue ? ' !' : ''}</span>`;
+    let html = '';
+    groups.forEach(group => {
+        const isCollapsed = collapsedSections.has(group.id);
+        if (hasSections) {
+            html += `<tr class="section-header ${isCollapsed ? 'collapsed' : ''}" onclick="toggleSection('${group.id}')">
+                <td colspan="7">
+                    <span class="section-toggle">&#9660;</span>
+                    ${escapeHtml(group.name)}
+                    <span class="section-count">(${group.tasks.length})</span>
+                </td>
+            </tr>`;
         }
+        if (!isCollapsed) {
+            group.tasks.forEach(t => {
+                html += renderTaskRow(t, today);
+            });
+        }
+    });
 
-        const labels = (t.labels || []).map(l => `<span class="label-tag">${escapeHtml(l)}</span>`).join('');
-        const sectionName = getSectionName(t);
-        const assignee = getAssigneeName(t);
-
-        const isCompleted = t._status === 'completed' || t.is_completed || t.checked;
-        const statusBadge = isCompleted
-            ? '<span class="status-badge status-completed">Erledigt</span>'
-            : '<span class="status-badge status-open">Offen</span>';
-
-        return `<tr class="${selectedClass}" data-id="${t.id}">
-            <td class="col-check"><input type="checkbox" ${checked} onchange="toggleSelect('${t.id}')"></td>
-            <td style="${indent}"><div class="task-content">${hierarchyPrefix}<span>${escapeHtml(t.content)}</span>${desc}</div></td>
-            <td>${statusBadge}</td>
-            <td>${priorityBadge}</td>
-            <td>${dueHtml}</td>
-            <td>${assignee ? escapeHtml(assignee) : '—'}</td>
-            <td>${labels || '—'}</td>
-            <td>${sectionName ? escapeHtml(sectionName) : '—'}</td>
-        </tr>`;
-    }).join('');
-
+    tbody.innerHTML = html;
     taskCount.textContent = `${filteredTasks.length} Aufgabe${filteredTasks.length !== 1 ? 'n' : ''} angezeigt`;
 }
 
-// ── Selection ──
+function renderTaskRow(t, today) {
+    const checked = selectedIds.has(t.id) ? 'checked' : '';
+    const selectedClass = selectedIds.has(t.id) ? 'selected' : '';
+    const depth = t._depth || 0;
+    const indent = depth > 0 ? `padding-left: ${depth * 24 + 12}px` : '';
+    const hierarchyPrefix = depth > 0 ? '<span class="subtask-indicator">&#x2514; </span>' : '';
 
-function toggleSelect(id) {
-    if (selectedIds.has(id)) {
-        selectedIds.delete(id);
-    } else {
-        selectedIds.add(id);
+    const desc = t.description
+        ? `<span class="task-description">${escapeHtml(t.description.substring(0, 80))}${t.description.length > 80 ? '...' : ''}</span>`
+        : '';
+
+    const priorityBadge = `<span class="priority-badge priority-${t.priority}">${PRIORITY_LABELS[t.priority] || 'P4'}</span>`;
+
+    let dueHtml = '—';
+    if (t.due) {
+        const dueDate = new Date(t.due.date);
+        const isOverdue = dueDate < today;
+        const cls = isOverdue ? 'due-date overdue' : 'due-date';
+        dueHtml = `<span class="${cls}">${formatDate(t.due.date)}${isOverdue ? ' !' : ''}</span>`;
     }
+
+    const labels = (t.labels || []).map(l => `<span class="label-tag">${escapeHtml(l)}</span>`).join('');
+    const assignee = getAssigneeName(t);
+
+    const isCompleted = t._status === 'completed' || t.is_completed || t.checked;
+    const statusChecked = isCompleted ? 'checked' : '';
+    const statusCheckbox = `<input type="checkbox" class="status-cb" ${statusChecked} onchange="toggleTaskStatus('${t.id}', this)" title="${isCompleted ? 'Als unerledigt markieren' : 'Als erledigt markieren'}">`;
+
+    return `<tr class="${selectedClass}" data-id="${t.id}">
+        <td class="col-check"><input type="checkbox" ${checked} onchange="toggleSelect('${t.id}')"></td>
+        <td style="${indent}"><div class="task-content">${hierarchyPrefix}<span>${escapeHtml(t.content)}</span>${desc}</div></td>
+        <td class="col-status">${statusCheckbox}</td>
+        <td>${priorityBadge}</td>
+        <td>${dueHtml}</td>
+        <td>${assignee ? escapeHtml(assignee) : '—'}</td>
+        <td>${labels || '—'}</td>
+    </tr>`;
+}
+
+// ── Inline Status Toggle ──
+async function toggleTaskStatus(taskId, checkbox) {
+    checkbox.disabled = true;
+    const projectId = document.getElementById('project-select').value;
+    const wasCompleted = !checkbox.checked; // inverted because change already happened
+
+    try {
+        if (checkbox.checked) {
+            await api('POST', `/tasks/${taskId}/close`);
+            showToast('Aufgabe als erledigt markiert.', 'success');
+        } else {
+            await api('POST', `/tasks/${taskId}/reopen`);
+            showToast('Aufgabe als unerledigt markiert.', 'success');
+        }
+        invalidateCache(projectId);
+        await loadTasks(true);
+    } catch (e) {
+        checkbox.checked = wasCompleted;
+        checkbox.disabled = false;
+        showToast('Fehler: ' + e.message, 'error');
+    }
+}
+
+// ── Section Collapse ──
+function toggleSection(sectionId) {
+    if (collapsedSections.has(sectionId)) {
+        collapsedSections.delete(sectionId);
+    } else {
+        collapsedSections.add(sectionId);
+    }
+    renderTable();
+}
+
+function expandAllSections() {
+    collapsedSections.clear();
+    renderTable();
+}
+
+function collapseAllSections() {
+    // Collect all section IDs from current render
+    const groups = new Set();
+    filteredTasks.forEach(t => {
+        groups.add(getSectionId(t) || '__none__');
+    });
+    groups.forEach(id => collapsedSections.add(id));
+    renderTable();
+}
+
+// ── Selection ──
+function toggleSelect(id) {
+    if (selectedIds.has(id)) selectedIds.delete(id);
+    else selectedIds.add(id);
     updateSelectionCount();
     const row = document.querySelector(`tr[data-id="${id}"]`);
     if (row) row.classList.toggle('selected', selectedIds.has(id));
@@ -548,9 +600,7 @@ function toggleSelect(id) {
 function toggleSelectAll() {
     const checked = document.getElementById('select-all').checked;
     selectedIds.clear();
-    if (checked) {
-        filteredTasks.forEach(t => selectedIds.add(t.id));
-    }
+    if (checked) filteredTasks.forEach(t => selectedIds.add(t.id));
     updateSelectionCount();
     renderTable();
 }
@@ -559,36 +609,28 @@ function updateSelectionCount() {
     document.getElementById('selection-count').textContent = `${selectedIds.size} ausgewählt`;
 }
 
-// ── Actions ──
-
+// ── Bulk Actions ──
 function setActionButtonsDisabled(disabled) {
     document.querySelectorAll('.action-buttons button').forEach(b => b.disabled = disabled);
 }
 
 async function reopenSelected() {
-    if (selectedIds.size === 0) {
-        showToast('Bitte zuerst Aufgaben auswählen.', 'error');
-        return;
-    }
-
+    if (selectedIds.size === 0) { showToast('Bitte Aufgaben auswählen.', 'error'); return; }
     const projectId = document.getElementById('project-select').value;
     const ids = [...selectedIds];
     setActionButtonsDisabled(true);
 
-    const tasks = ids.map(id => () => api('POST', `/tasks/${id}/reopen`));
-
-    const { completed, failed } = await parallelLimit(tasks, 5, (done, total, ok, err) => {
-        showProgress(done, total, 'Als unerledigt markieren');
-    });
+    const { completed, failed } = await parallelLimit(
+        ids.map(id => () => api('POST', `/tasks/${id}/reopen`)), 5,
+        (done, total) => showProgress(done, total, 'Als unerledigt markieren')
+    );
 
     hideProgress();
     setActionButtonsDisabled(false);
-
-    if (failed > 0) {
-        showToast(`${completed} zurückgesetzt, ${failed} fehlgeschlagen.`, 'error');
-    } else {
-        showToast(`${completed} Aufgabe${completed !== 1 ? 'n' : ''} als unerledigt markiert.`, 'success');
-    }
+    showToast(failed > 0
+        ? `${completed} zurückgesetzt, ${failed} fehlgeschlagen.`
+        : `${completed} Aufgabe${completed !== 1 ? 'n' : ''} als unerledigt markiert.`,
+        failed > 0 ? 'error' : 'success');
 
     selectedIds.clear();
     invalidateCache(projectId);
@@ -596,29 +638,22 @@ async function reopenSelected() {
 }
 
 async function completeSelected() {
-    if (selectedIds.size === 0) {
-        showToast('Bitte zuerst Aufgaben auswählen.', 'error');
-        return;
-    }
-
+    if (selectedIds.size === 0) { showToast('Bitte Aufgaben auswählen.', 'error'); return; }
     const projectId = document.getElementById('project-select').value;
     const ids = [...selectedIds];
     setActionButtonsDisabled(true);
 
-    const tasks = ids.map(id => () => api('POST', `/tasks/${id}/close`));
-
-    const { completed, failed } = await parallelLimit(tasks, 5, (done, total, ok, err) => {
-        showProgress(done, total, 'Als erledigt markieren');
-    });
+    const { completed, failed } = await parallelLimit(
+        ids.map(id => () => api('POST', `/tasks/${id}/close`)), 5,
+        (done, total) => showProgress(done, total, 'Als erledigt markieren')
+    );
 
     hideProgress();
     setActionButtonsDisabled(false);
-
-    if (failed > 0) {
-        showToast(`${completed} erledigt, ${failed} fehlgeschlagen.`, 'error');
-    } else {
-        showToast(`${completed} Aufgabe${completed !== 1 ? 'n' : ''} als erledigt markiert.`, 'success');
-    }
+    showToast(failed > 0
+        ? `${completed} erledigt, ${failed} fehlgeschlagen.`
+        : `${completed} Aufgabe${completed !== 1 ? 'n' : ''} als erledigt markiert.`,
+        failed > 0 ? 'error' : 'success');
 
     selectedIds.clear();
     invalidateCache(projectId);
@@ -626,7 +661,6 @@ async function completeSelected() {
 }
 
 // ── Helpers ──
-
 function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
@@ -648,25 +682,11 @@ function showToast(msg, type = '') {
     toast._timeout = setTimeout(() => toast.classList.add('hidden'), 3500);
 }
 
-// Status filter: switch from cache without re-fetching
-document.getElementById('filter-status').addEventListener('change', () => {
-    const projectId = document.getElementById('project-select').value;
-    if (!projectId) return;
-    // If we have cache, just re-apply filters (no API call)
-    const cached = taskCache[projectId];
-    if (cached) {
-        applyFilters();
-    } else {
-        loadTasks();
-    }
-});
-
-// Allow connecting with Enter key
-document.getElementById('token-input').addEventListener('keydown', (e) => {
+// ── Init ──
+document.getElementById('token-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') connect();
 });
 
-// Auto-connect with cached token
 (function () {
     const cached = localStorage.getItem('todoist_token');
     if (cached) {

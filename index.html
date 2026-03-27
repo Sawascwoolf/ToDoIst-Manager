@@ -33,45 +33,41 @@
 
         <!-- Filters & Actions -->
         <section id="filter-section" class="card hidden">
-            <h2>Filter &amp; Aktionen</h2>
             <div class="filter-row">
-                <div class="filter-group">
-                    <label for="filter-search">Suche</label>
+                <div class="filter-group filter-group-wide">
+                    <label>Suche</label>
                     <input type="text" id="filter-search" placeholder="Aufgabe suchen..." oninput="applyFilters()">
                 </div>
                 <div class="filter-group">
-                    <label for="filter-priority">Priorit&auml;t</label>
-                    <select id="filter-priority" onchange="applyFilters()">
-                        <option value="">Alle</option>
-                        <option value="4">P1 (Dringend)</option>
-                        <option value="3">P2 (Hoch)</option>
-                        <option value="2">P3 (Mittel)</option>
-                        <option value="1">P4 (Normal)</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="filter-label">Label</label>
+                    <label>Label</label>
                     <select id="filter-label" onchange="applyFilters()">
                         <option value="">Alle</option>
                     </select>
                 </div>
-                <div class="filter-group">
-                    <label for="filter-due">F&auml;lligkeit</label>
-                    <select id="filter-due" onchange="applyFilters()">
-                        <option value="">Alle</option>
-                        <option value="overdue">&Uuml;berf&auml;llig</option>
-                        <option value="today">Heute</option>
-                        <option value="week">Diese Woche</option>
-                        <option value="nodue">Ohne Datum</option>
-                    </select>
+            </div>
+
+            <div class="toggle-filters">
+                <div class="toggle-group">
+                    <label>Status</label>
+                    <div class="toggle-buttons" id="filter-status-toggles">
+                        <button class="toggle-btn active" data-value="open" onclick="toggleFilter(this)">Offen</button>
+                        <button class="toggle-btn" data-value="completed" onclick="toggleFilter(this)">Erledigt</button>
+                    </div>
                 </div>
-                <div class="filter-group">
-                    <label for="filter-status">Status</label>
-                    <select id="filter-status">
-                        <option value="open">Offen</option>
-                        <option value="completed">Erledigt</option>
-                        <option value="all">Alle</option>
-                    </select>
+                <div class="toggle-group">
+                    <label>Priorit&auml;t</label>
+                    <div class="toggle-buttons" id="filter-priority-toggles">
+                        <button class="toggle-btn active p1" data-value="4" onclick="toggleFilter(this)">P1</button>
+                        <button class="toggle-btn active p2" data-value="3" onclick="toggleFilter(this)">P2</button>
+                        <button class="toggle-btn active p3" data-value="2" onclick="toggleFilter(this)">P3</button>
+                        <button class="toggle-btn active p4" data-value="1" onclick="toggleFilter(this)">P4</button>
+                    </div>
+                </div>
+                <div class="toggle-group">
+                    <label>Verantwortlich</label>
+                    <div class="toggle-buttons" id="filter-assignee-toggles">
+                        <span class="toggle-hint">Wird nach Laden angezeigt</span>
+                    </div>
                 </div>
             </div>
 
@@ -84,8 +80,8 @@
                     <span id="selection-count">0 ausgew&auml;hlt</span>
                 </div>
                 <div class="action-buttons">
-                    <button class="btn-danger" onclick="reopenSelected()" title="Ausgew&auml;hlte Aufgaben als unerledigt markieren">Als unerledigt markieren</button>
-                    <button class="btn-success" onclick="completeSelected()" title="Ausgew&auml;hlte Aufgaben als erledigt markieren">Als erledigt markieren</button>
+                    <button class="btn-danger" onclick="reopenSelected()">Als unerledigt markieren</button>
+                    <button class="btn-success" onclick="completeSelected()">Als erledigt markieren</button>
                 </div>
             </div>
         </section>
@@ -104,6 +100,10 @@
                 <div class="spinner"></div>
                 <span>Lade Aufgaben...</span>
             </div>
+            <div class="section-controls hidden" id="section-controls">
+                <button class="btn-small" onclick="expandAllSections()">Alle aufklappen</button>
+                <button class="btn-small" onclick="collapseAllSections()">Alle zuklappen</button>
+            </div>
             <div class="table-wrapper">
                 <table id="task-table">
                     <thead>
@@ -115,7 +115,6 @@
                             <th class="col-due sortable" onclick="sortBy('due')">F&auml;lligkeit <span class="sort-icon"></span></th>
                             <th class="col-assignee sortable" onclick="sortBy('assignee')">Verantwortlich <span class="sort-icon"></span></th>
                             <th class="col-labels">Labels</th>
-                            <th class="col-section sortable" onclick="sortBy('section')">Abschnitt <span class="sort-icon"></span></th>
                         </tr>
                     </thead>
                     <tbody id="task-body"></tbody>
@@ -128,8 +127,7 @@
         <!-- Status Toast -->
         <div id="toast" class="toast hidden"></div>
 
-        <footer class="version-footer">Build #9</footer>
-<!-- query params: projectId (camelCase for API v1) -->
+        <footer class="version-footer">Build #10</footer>
     </div>
 
     <script src="app.js"></script>
