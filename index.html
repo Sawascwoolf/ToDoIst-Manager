@@ -67,9 +67,10 @@
                 </div>
                 <div class="filter-group">
                     <label for="filter-status">Status</label>
-                    <select id="filter-status" onchange="applyFilters()">
+                    <select id="filter-status">
                         <option value="open">Offen</option>
                         <option value="completed">Erledigt</option>
+                        <option value="all">Alle</option>
                     </select>
                 </div>
             </div>
@@ -89,6 +90,14 @@
             </div>
         </section>
 
+        <!-- Progress Bar -->
+        <div id="progress-bar" class="card progress-card hidden">
+            <div class="progress-track">
+                <div class="progress-fill"></div>
+            </div>
+            <span class="progress-text"></span>
+        </div>
+
         <!-- Task Table -->
         <section id="task-section" class="card hidden">
             <div id="loading" class="hidden">
@@ -101,6 +110,7 @@
                         <tr>
                             <th class="col-check"></th>
                             <th class="col-task sortable" onclick="sortBy('content')">Aufgabe <span class="sort-icon"></span></th>
+                            <th class="col-status">Status</th>
                             <th class="col-priority sortable" onclick="sortBy('priority')">Priorit&auml;t <span class="sort-icon"></span></th>
                             <th class="col-due sortable" onclick="sortBy('due')">F&auml;lligkeit <span class="sort-icon"></span></th>
                             <th class="col-labels">Labels</th>
@@ -117,7 +127,7 @@
         <!-- Status Toast -->
         <div id="toast" class="toast hidden"></div>
 
-        <footer class="version-footer">Build #4</footer>
+        <footer class="version-footer">Build #5</footer>
     </div>
 
     <script src="app.js"></script>

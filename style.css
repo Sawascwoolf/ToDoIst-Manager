@@ -217,6 +217,36 @@ button:disabled {
     gap: 8px;
 }
 
+/* Progress Bar */
+.progress-card {
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.progress-track {
+    flex: 1;
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--primary);
+    border-radius: 4px;
+    transition: width 0.2s;
+}
+
+.progress-text {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
 /* Table */
 .table-wrapper {
     overflow-x: auto;
@@ -283,6 +313,10 @@ tbody td {
     width: 40px;
 }
 
+.col-status {
+    width: 90px;
+}
+
 .col-priority {
     width: 100px;
 }
@@ -308,6 +342,30 @@ tbody td {
     font-size: 0.8rem;
     color: var(--text-muted);
     margin-top: 2px;
+}
+
+.subtask-indicator {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+/* Status Badges */
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.status-open {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.status-completed {
+    background: #e0e0e0;
+    color: #616161;
 }
 
 .priority-badge {

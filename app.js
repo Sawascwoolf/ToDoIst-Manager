@@ -39,7 +39,6 @@ async function apiPaginated(path) {
         const data = await api('GET', url);
 
         if (Array.isArray(data)) {
-            // Fallback if API returns bare array
             allResults = allResults.concat(data);
             break;
         }
@@ -49,6 +48,48 @@ async function apiPaginated(path) {
     } while (cursor);
 
     return allResults;
+}
+
+// Run promises in parallel with concurrency limit
+async function parallelLimit(tasks, limit, onProgress) {
+    let completed = 0;
+    let failed = 0;
+    const results = [];
+    let index = 0;
+
+    async function runNext() {
+        while (index < tasks.length) {
+            const i = index++;
+            try {
+                results[i] = await tasks[i]();
+                completed++;
+            } catch (e) {
+                results[i] = e;
+                failed++;
+            }
+            if (onProgress) onProgress(completed + failed, tasks.length, completed, failed);
+        }
+    }
+
+    const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => runNext());
+    await Promise.all(workers);
+    return { completed, failed };
+}
+
+// ── Progress Bar ──
+
+function showProgress(current, total, label) {
+    let bar = document.getElementById('progress-bar');
+    if (!bar) return;
+    bar.classList.remove('hidden');
+    const pct = Math.round((current / total) * 100);
+    bar.querySelector('.progress-fill').style.width = pct + '%';
+    bar.querySelector('.progress-text').textContent = `${label}: ${current} / ${total}`;
+}
+
+function hideProgress() {
+    const bar = document.getElementById('progress-bar');
+    if (bar) bar.classList.add('hidden');
 }
 
 // ── Connect ──
@@ -125,22 +166,34 @@ async function loadTasks() {
 
     try {
         const statusFilter = document.getElementById('filter-status').value;
-        const isCompleted = statusFilter === 'completed';
 
-        let tasks;
-        if (isCompleted) {
-            tasks = await loadCompletedTasks(projectId);
+        // Load sections in parallel with tasks
+        const sectionsPromise = apiPaginated(`/sections?project_id=${projectId}`);
+
+        let openTasks = [];
+        let completedTasks = [];
+
+        if (statusFilter === 'completed') {
+            completedTasks = await loadCompletedTasks(projectId);
+        } else if (statusFilter === 'all') {
+            [openTasks, completedTasks] = await Promise.all([
+                apiPaginated(`/tasks?project_id=${projectId}`),
+                loadCompletedTasks(projectId),
+            ]);
         } else {
-            tasks = await apiPaginated(`/tasks?project_id=${projectId}`);
+            openTasks = await apiPaginated(`/tasks?project_id=${projectId}`);
         }
 
-        // Load sections for this project
-        const sectionList = await apiPaginated(`/sections?project_id=${projectId}`);
+        // Mark open tasks explicitly
+        openTasks.forEach(t => { t._status = 'open'; });
+        completedTasks.forEach(t => { t._status = 'completed'; });
+
+        const sectionList = await sectionsPromise;
         sections = {};
         sectionList.forEach(s => { sections[s.id] = s.name; });
 
-        allTasks = tasks;
-        populateLabelFilter(tasks);
+        allTasks = [...openTasks, ...completedTasks];
+        populateLabelFilter(allTasks);
         applyFilters();
     } catch (e) {
         showToast('Fehler beim Laden: ' + e.message, 'error');
@@ -161,12 +214,65 @@ async function loadCompletedTasks(projectId) {
             labels: [],
             due: null,
             sectionId: item.sectionId || item.section_id || null,
-            is_completed: true,
+            parentId: item.parentId || item.parent_id || null,
+            _status: 'completed',
         }));
     } catch (e) {
         showToast('Fehler beim Laden erledigter Aufgaben: ' + e.message, 'error');
         return [];
     }
+}
+
+// ── Hierarchy ──
+
+function buildHierarchy(tasks) {
+    const taskMap = new Map();
+    tasks.forEach(t => taskMap.set(t.id, t));
+
+    // Calculate depth for each task
+    tasks.forEach(t => {
+        let depth = 0;
+        let current = t;
+        const parentKey = current.parentId || current.parent_id;
+        let pid = parentKey;
+        while (pid && taskMap.has(pid)) {
+            depth++;
+            current = taskMap.get(pid);
+            pid = current.parentId || current.parent_id;
+        }
+        t._depth = depth;
+    });
+
+    // Sort: parents first, then children in order, preserving existing sort
+    const roots = tasks.filter(t => t._depth === 0);
+    const children = tasks.filter(t => t._depth > 0);
+
+    // Group children by parent
+    const childrenByParent = new Map();
+    children.forEach(c => {
+        const pid = c.parentId || c.parent_id;
+        if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
+        childrenByParent.get(pid).push(c);
+    });
+
+    // Flatten tree in order
+    const result = [];
+    function addWithChildren(task) {
+        result.push(task);
+        const kids = childrenByParent.get(task.id) || [];
+        kids.forEach(kid => addWithChildren(kid));
+    }
+    roots.forEach(r => addWithChildren(r));
+
+    // Add orphaned children (parent not in current list)
+    children.forEach(c => {
+        if (!result.includes(c)) {
+            c._depth = 0; // treat as root if parent not visible
+            result.push(c);
+        }
+    });
+
+    return result;
 }
 
 // ── Filters ──
@@ -218,6 +324,7 @@ function applyFilters() {
     });
 
     sortTasks();
+    filteredTasks = buildHierarchy(filteredTasks);
     selectedIds.clear();
     document.getElementById('select-all').checked = false;
     updateSelectionCount();
@@ -234,7 +341,6 @@ function sortBy(field) {
         sortAsc = true;
     }
 
-    // Update header icons
     document.querySelectorAll('th.sortable').forEach(th => {
         th.classList.remove('sort-asc', 'sort-desc');
     });
@@ -245,6 +351,7 @@ function sortBy(field) {
     }
 
     sortTasks();
+    filteredTasks = buildHierarchy(filteredTasks);
     renderTable();
 }
 
@@ -306,10 +413,14 @@ function renderTable() {
     tbody.innerHTML = filteredTasks.map(t => {
         const checked = selectedIds.has(t.id) ? 'checked' : '';
         const selectedClass = selectedIds.has(t.id) ? 'selected' : '';
+        const depth = t._depth || 0;
+        const indent = depth > 0 ? `padding-left: ${depth * 24 + 12}px` : '';
 
         const desc = t.description
             ? `<span class="task-description">${escapeHtml(t.description.substring(0, 80))}${t.description.length > 80 ? '...' : ''}</span>`
             : '';
+
+        const hierarchyPrefix = depth > 0 ? '<span class="subtask-indicator">&#x2514; </span>' : '';
 
         const priorityBadge = `<span class="priority-badge priority-${t.priority}">${PRIORITY_LABELS[t.priority] || 'P4'}</span>`;
 
@@ -324,9 +435,15 @@ function renderTable() {
         const labels = (t.labels || []).map(l => `<span class="label-tag">${escapeHtml(l)}</span>`).join('');
         const sectionName = getSectionName(t);
 
+        const isCompleted = t._status === 'completed' || t.is_completed || t.checked;
+        const statusBadge = isCompleted
+            ? '<span class="status-badge status-completed">Erledigt</span>'
+            : '<span class="status-badge status-open">Offen</span>';
+
         return `<tr class="${selectedClass}" data-id="${t.id}">
             <td class="col-check"><input type="checkbox" ${checked} onchange="toggleSelect('${t.id}')"></td>
-            <td><div class="task-content"><span>${escapeHtml(t.content)}</span>${desc}</div></td>
+            <td style="${indent}"><div class="task-content">${hierarchyPrefix}<span>${escapeHtml(t.content)}</span>${desc}</div></td>
+            <td>${statusBadge}</td>
             <td>${priorityBadge}</td>
             <td>${dueHtml}</td>
             <td>${labels || '—'}</td>
@@ -368,33 +485,33 @@ function updateSelectionCount() {
 
 // ── Actions ──
 
+function setActionButtonsDisabled(disabled) {
+    document.querySelectorAll('.action-buttons button').forEach(b => b.disabled = disabled);
+}
+
 async function reopenSelected() {
     if (selectedIds.size === 0) {
         showToast('Bitte zuerst Aufgaben auswählen.', 'error');
         return;
     }
 
-    const count = selectedIds.size;
     const ids = [...selectedIds];
+    const total = ids.length;
+    setActionButtonsDisabled(true);
 
-    showToast(`${count} Aufgabe${count !== 1 ? 'n' : ''} werden als unerledigt markiert...`);
+    const tasks = ids.map(id => () => api('POST', `/tasks/${id}/reopen`));
 
-    let success = 0;
-    let failed = 0;
+    const { completed, failed } = await parallelLimit(tasks, 5, (done, total, ok, err) => {
+        showProgress(done, total, 'Als unerledigt markieren');
+    });
 
-    for (const id of ids) {
-        try {
-            await api('POST', `/tasks/${id}/reopen`);
-            success++;
-        } catch (e) {
-            failed++;
-        }
-    }
+    hideProgress();
+    setActionButtonsDisabled(false);
 
     if (failed > 0) {
-        showToast(`${success} zurückgesetzt, ${failed} fehlgeschlagen.`, 'error');
+        showToast(`${completed} zurückgesetzt, ${failed} fehlgeschlagen.`, 'error');
     } else {
-        showToast(`${success} Aufgabe${success !== 1 ? 'n' : ''} als unerledigt markiert.`, 'success');
+        showToast(`${completed} Aufgabe${completed !== 1 ? 'n' : ''} als unerledigt markiert.`, 'success');
     }
 
     selectedIds.clear();
@@ -407,27 +524,23 @@ async function completeSelected() {
         return;
     }
 
-    const count = selectedIds.size;
     const ids = [...selectedIds];
+    const total = ids.length;
+    setActionButtonsDisabled(true);
 
-    showToast(`${count} Aufgabe${count !== 1 ? 'n' : ''} werden als erledigt markiert...`);
+    const tasks = ids.map(id => () => api('POST', `/tasks/${id}/close`));
 
-    let success = 0;
-    let failed = 0;
+    const { completed, failed } = await parallelLimit(tasks, 5, (done, total, ok, err) => {
+        showProgress(done, total, 'Als erledigt markieren');
+    });
 
-    for (const id of ids) {
-        try {
-            await api('POST', `/tasks/${id}/close`);
-            success++;
-        } catch (e) {
-            failed++;
-        }
-    }
+    hideProgress();
+    setActionButtonsDisabled(false);
 
     if (failed > 0) {
-        showToast(`${success} erledigt, ${failed} fehlgeschlagen.`, 'error');
+        showToast(`${completed} erledigt, ${failed} fehlgeschlagen.`, 'error');
     } else {
-        showToast(`${success} Aufgabe${success !== 1 ? 'n' : ''} als erledigt markiert.`, 'success');
+        showToast(`${completed} Aufgabe${completed !== 1 ? 'n' : ''} als erledigt markiert.`, 'success');
     }
 
     selectedIds.clear();
