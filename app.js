@@ -136,6 +136,7 @@ async function connect() {
             select.appendChild(opt);
         });
         document.getElementById('project-section').classList.remove('hidden');
+        localStorage.setItem('todoist_token', token);
         showToast('Verbunden! Bitte Projekt auswählen.', 'success');
     } catch (e) {
         if (e instanceof TypeError) {
@@ -580,3 +581,12 @@ document.getElementById('filter-status').addEventListener('change', () => {
 document.getElementById('token-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') connect();
 });
+
+// Auto-connect with cached token
+(function () {
+    const cached = localStorage.getItem('todoist_token');
+    if (cached) {
+        document.getElementById('token-input').value = cached;
+        connect();
+    }
+})();
