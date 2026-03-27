@@ -67,7 +67,7 @@ async function parallelLimit(tasks, limit, onProgress) {
                 results[i] = e;
                 failed++;
             }
-            if (onProgress) onProgress(completed + failed, tasks.length, completed, failed);
+            if (onProgress) await onProgress(completed + failed, tasks.length, completed, failed);
         }
     }
 
@@ -78,13 +78,15 @@ async function parallelLimit(tasks, limit, onProgress) {
 
 // ── Progress Bar ──
 
-function showProgress(current, total, label) {
+async function showProgress(current, total, label) {
     let bar = document.getElementById('progress-bar');
     if (!bar) return;
     bar.classList.remove('hidden');
     const pct = Math.round((current / total) * 100);
     bar.querySelector('.progress-fill').style.width = pct + '%';
     bar.querySelector('.progress-text').textContent = `${label}: ${current} / ${total}`;
+    // Yield to browser so it can repaint
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 }
 
 function hideProgress() {
