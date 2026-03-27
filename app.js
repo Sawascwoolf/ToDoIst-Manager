@@ -12,13 +12,13 @@ let sortAsc = true;
 // ── API Helpers ──
 
 async function api(method, path, body = null, base = API_BASE) {
-    const opts = {
-        method,
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-        },
+    const headers = {
+        'Authorization': `Bearer ${token}`,
     };
+    if (body) {
+        headers['Content-Type'] = 'application/json';
+    }
+    const opts = { method, headers };
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(`${base}${path}`, opts);
     if (!res.ok) {
