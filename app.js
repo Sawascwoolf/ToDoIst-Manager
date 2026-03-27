@@ -8,8 +8,9 @@ let collaborators = {};
 let selectedIds = new Set();
 let sortField = 'content';
 let sortAsc = true;
-let collapsedIds = new Set(); // section IDs and parent task IDs
+let collapsedIds = new Set();
 let ctxTaskId = null;
+let currentProjectId = null;
 
 // ── Cache ──
 const taskCache = {};
@@ -96,7 +97,6 @@ function handleToggle(e) {
     const isMulti = e.ctrlKey || e.metaKey;
 
     if (btn.dataset.value === '__select_all__') {
-        // "Alle" meta button: toggle all others
         const others = container.querySelectorAll('.toggle-btn:not([data-value="__select_all__"])');
         const allActive = [...others].every(b => b.classList.contains('active'));
         others.forEach(b => b.classList.toggle('active', !allActive));
@@ -111,7 +111,6 @@ function handleToggle(e) {
         const wasOnlyActive = btn.classList.contains('active') &&
             [...siblings].filter(b => b.classList.contains('active')).length === 1;
         if (wasOnlyActive) {
-            // Clicking the only active button → activate all
             siblings.forEach(b => b.classList.add('active'));
         } else {
             siblings.forEach(b => b.classList.remove('active'));
@@ -135,22 +134,14 @@ function handleTouchEnd(e) {
     if (longPressTimer) {
         clearTimeout(longPressTimer);
         longPressTimer = null;
-        // Normal tap → exclusive
         const btn = e.currentTarget;
         const container = btn.parentElement;
-        if (btn.dataset.value === '__select_all__') {
-            handleToggle(e);
-            return;
-        }
+        if (btn.dataset.value === '__select_all__') { handleToggle(e); return; }
         const siblings = container.querySelectorAll('.toggle-btn:not([data-value="__select_all__"])');
         const wasOnlyActive = btn.classList.contains('active') &&
             [...siblings].filter(b => b.classList.contains('active')).length === 1;
-        if (wasOnlyActive) {
-            siblings.forEach(b => b.classList.add('active'));
-        } else {
-            siblings.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-        }
+        if (wasOnlyActive) { siblings.forEach(b => b.classList.add('active')); }
+        else { siblings.forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
         applyFilters();
         e.preventDefault();
     }
@@ -186,11 +177,13 @@ async function connect() {
         const data = await r.json();
         const projects = data.results || data;
         const sel = document.getElementById('project-select');
-        sel.innerHTML = '<option value="">-- wählen --</option>';
+        sel.innerHTML = '<option value="">Projekt wählen...</option>';
         projects.forEach(p => { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o); });
-        document.getElementById('project-section').classList.remove('hidden');
+        sel.classList.remove('hidden');
         localStorage.setItem('todoist_token', token);
         showToast(`${projects.length} Projekte geladen.`, 'success');
+        // Auto-close sidebar after successful connect
+        if (document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
     } catch (e) {
         err.textContent = e instanceof TypeError ? 'Netzwerkfehler. Internet/Adblocker prüfen.' : e.message;
         err.classList.remove('hidden');
@@ -201,9 +194,7 @@ async function connect() {
 async function loadTasks(force) {
     const pid = document.getElementById('project-select').value;
     if (!pid) return;
-
-    document.getElementById('project-title').textContent =
-        document.getElementById('project-select').selectedOptions[0]?.textContent || 'Todoist Manager';
+    currentProjectId = pid;
 
     if (!force) {
         const c = getCached(pid);
@@ -318,7 +309,6 @@ function buildHierarchy(tasks) {
 }
 
 function isHiddenByCollapse(task) {
-    // Walk up parents: if any ancestor is collapsed, hide this task
     const map = new Map(); filteredTasks.forEach(t => map.set(t.id, t));
     let pid = task.parentId || task.parent_id;
     while (pid) {
@@ -327,10 +317,8 @@ function isHiddenByCollapse(task) {
         if (!parent) break;
         pid = parent.parentId || parent.parent_id;
     }
-    // Check section collapse
     const sid = task.sectionId || task.section_id || '__none__';
-    if (collapsedIds.has('sec_' + sid)) return true;
-    return false;
+    return collapsedIds.has('sec_' + sid);
 }
 
 // ── Filters ──
@@ -354,7 +342,6 @@ function applyFilters() {
         if (assignees.length > 0) {
             const uid = t.responsibleUid || t.assigneeId || t.assignee_id;
             if (!uid && !assignees.includes('__none__')) return false;
-            if (uid && !assignees.includes(uid) && !assignees.includes('__none__')) return false;
             if (uid && !assignees.includes(uid)) return false;
         }
         return true;
@@ -400,6 +387,10 @@ function getAssignee(t) { const u = t.responsibleUid || t.assigneeId || t.assign
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function fmtDate(s) { return new Date(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
 
+function todoistUrl(taskId) {
+    return `https://todoist.com/app/task/${taskId}`;
+}
+
 // ── Stats ──
 function updateStats() {
     const total = allTasks.length;
@@ -420,7 +411,6 @@ function renderTable() {
     if (filteredTasks.length === 0) { tbody.innerHTML = ''; noTasks.classList.remove('hidden'); secCtrl.style.display = 'none'; return; }
     noTasks.classList.add('hidden');
 
-    // Group by section
     const groups = []; const gmap = new Map();
     filteredTasks.forEach(t => {
         const sid = getSid(t) || '__none__';
@@ -458,7 +448,6 @@ function taskRow(t, today) {
     const pad = depth > 0 ? `padding-left:${depth * 20 + 10}px` : '';
     const prefix = depth > 0 ? '<span class="subtask-indicator">&#x2514; </span>' : '';
 
-    // Collapse toggle for parents
     let collapseBtn = '';
     if (t._hasChildren) {
         const isColl = collapsedIds.has(t.id);
@@ -477,10 +466,11 @@ function taskRow(t, today) {
 
     const labels = (t.labels || []).map(l => `<span class="label-tag">${esc(l)}</span>`).join('');
     const assignee = getAssignee(t);
+    const taskLink = `<a href="${todoistUrl(t.id)}" target="_blank" rel="noopener" class="task-link" title="In Todoist öffnen">${esc(t.content)}</a>`;
 
     return `<tr class="${sel ? 'selected' : ''}" data-id="${t.id}">
         <td class="col-check"><input type="checkbox" ${sel ? 'checked' : ''} onchange="toggleSelect('${t.id}')"></td>
-        <td style="${pad}"><div class="task-content">${collapseBtn}${prefix}<span>${esc(t.content)}</span>${desc}</div></td>
+        <td style="${pad}"><div class="task-content">${collapseBtn}${prefix}<span>${taskLink}</span>${desc}</div></td>
         <td class="col-status">${statusCb}</td>
         <td><span class="priority-badge priority-${t.priority}">${PRIO[t.priority] || 'P4'}</span></td>
         <td>${dueHtml || '—'}</td>
@@ -488,6 +478,35 @@ function taskRow(t, today) {
         <td>${labels || '—'}</td>
         <td class="col-actions"><button class="actions-btn" onclick="showCtxMenu(event,'${t.id}')">&#8943;</button></td>
     </tr>`;
+}
+
+// ── Local status update (no reload) ──
+function updateTaskStatusLocally(taskId, newStatus) {
+    const pid = currentProjectId;
+    const cache = taskCache[pid];
+    if (!cache) return;
+
+    if (newStatus === 'completed') {
+        // Move from open to completed
+        const idx = cache.open.findIndex(t => t.id === taskId);
+        if (idx >= 0) {
+            const task = cache.open.splice(idx, 1)[0];
+            task._status = 'completed';
+            cache.completed.push(task);
+        }
+    } else {
+        // Move from completed to open
+        const idx = cache.completed.findIndex(t => t.id === taskId);
+        if (idx >= 0) {
+            const task = cache.completed.splice(idx, 1)[0];
+            task._status = 'open';
+            cache.open.push(task);
+        }
+    }
+
+    // Also update allTasks reference
+    const task = allTasks.find(t => t.id === taskId);
+    if (task) task._status = newStatus;
 }
 
 // ── Collapse ──
@@ -517,13 +536,11 @@ async function ctxAction(action) {
     const id = ctxTaskId;
     hideCtxMenu();
     if (!id) return;
-    const pid = document.getElementById('project-select').value;
     try {
-        if (action === 'complete') await api('POST', `/tasks/${id}/close`);
-        else if (action === 'reopen') await api('POST', `/tasks/${id}/reopen`);
+        if (action === 'complete') { await api('POST', `/tasks/${id}/close`); updateTaskStatusLocally(id, 'completed'); }
+        else if (action === 'reopen') { await api('POST', `/tasks/${id}/reopen`); updateTaskStatusLocally(id, 'open'); }
         showToast(action === 'complete' ? 'Erledigt.' : 'Wieder geöffnet.', 'success');
-        invalidateCache(pid);
-        await loadTasks(true);
+        applyFilters();
     } catch (e) { showToast('Fehler: ' + e.message, 'error'); }
 }
 
@@ -531,17 +548,27 @@ document.addEventListener('click', e => {
     if (!e.target.closest('.context-menu') && !e.target.closest('.actions-btn')) hideCtxMenu();
 });
 
-// ── Inline status toggle ──
+// ── Inline status toggle (no page reload!) ──
 async function toggleTaskStatus(taskId, cb) {
     cb.disabled = true;
-    const pid = document.getElementById('project-select').value;
     const was = !cb.checked;
     try {
-        await api('POST', `/tasks/${taskId}/${cb.checked ? 'close' : 'reopen'}`);
-        showToast(cb.checked ? 'Erledigt.' : 'Wieder geöffnet.', 'success');
-        invalidateCache(pid);
-        await loadTasks(true);
-    } catch (e) { cb.checked = was; cb.disabled = false; showToast('Fehler: ' + e.message, 'error'); }
+        if (cb.checked) {
+            await api('POST', `/tasks/${taskId}/close`);
+            updateTaskStatusLocally(taskId, 'completed');
+            showToast('Erledigt.', 'success');
+        } else {
+            await api('POST', `/tasks/${taskId}/reopen`);
+            updateTaskStatusLocally(taskId, 'open');
+            showToast('Wieder geöffnet.', 'success');
+        }
+        // Re-apply filters to update view without full reload
+        applyFilters();
+    } catch (e) {
+        cb.checked = was;
+        cb.disabled = false;
+        showToast('Fehler: ' + e.message, 'error');
+    }
 }
 
 // ── Selection ──
@@ -572,26 +599,31 @@ function setActionsDisabled(d) { document.querySelectorAll('.bulk-actions button
 
 async function reopenSelected() {
     if (!selectedIds.size) return;
-    const pid = document.getElementById('project-select').value;
     setActionsDisabled(true);
+    const ids = [...selectedIds];
     const { completed, failed } = await parallelLimit(
-        [...selectedIds].map(id => () => api('POST', `/tasks/${id}/reopen`)), 5,
+        ids.map(id => () => api('POST', `/tasks/${id}/reopen`)), 5,
         (d, t) => showProgress(d, t, 'Unerledigt'));
     hideProgress(); setActionsDisabled(false);
+    // Update local cache
+    ids.forEach(id => updateTaskStatusLocally(id, 'open'));
     showToast(failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als unerledigt markiert.`, failed ? 'error' : 'success');
-    selectedIds.clear(); invalidateCache(pid); await loadTasks(true);
+    selectedIds.clear();
+    applyFilters();
 }
 
 async function completeSelected() {
     if (!selectedIds.size) return;
-    const pid = document.getElementById('project-select').value;
     setActionsDisabled(true);
+    const ids = [...selectedIds];
     const { completed, failed } = await parallelLimit(
-        [...selectedIds].map(id => () => api('POST', `/tasks/${id}/close`)), 5,
+        ids.map(id => () => api('POST', `/tasks/${id}/close`)), 5,
         (d, t) => showProgress(d, t, 'Erledigt'));
     hideProgress(); setActionsDisabled(false);
+    ids.forEach(id => updateTaskStatusLocally(id, 'completed'));
     showToast(failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als erledigt markiert.`, failed ? 'error' : 'success');
-    selectedIds.clear(); invalidateCache(pid); await loadTasks(true);
+    selectedIds.clear();
+    applyFilters();
 }
 
 // ── Toast ──

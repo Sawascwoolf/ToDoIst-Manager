@@ -7,10 +7,10 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Sidebar -->
+    <!-- Sidebar (Token only) -->
     <aside id="sidebar" class="sidebar">
         <div class="sidebar-header">
-            <h2>Todoist Manager</h2>
+            <h2>Einstellungen</h2>
             <button class="sidebar-close" onclick="toggleSidebar()">&times;</button>
         </div>
         <div class="sidebar-content">
@@ -23,21 +23,18 @@
                 </div>
                 <p id="auth-error" class="error hidden"></p>
             </div>
-            <div id="project-section" class="sidebar-section hidden">
-                <label>Projekt</label>
-                <select id="project-select" onchange="loadTasks()">
-                    <option value="">-- w&auml;hlen --</option>
-                </select>
-            </div>
         </div>
-        <div class="sidebar-footer">Build #11</div>
+        <div class="sidebar-footer">Build #12</div>
     </aside>
+    <div id="sidebar-overlay" class="sidebar-overlay hidden" onclick="toggleSidebar()"></div>
 
     <!-- Main Content -->
-    <div class="main" id="main">
+    <div class="main">
         <div class="topbar">
             <button class="hamburger" onclick="toggleSidebar()" title="Einstellungen">&#9776;</button>
-            <h1 id="project-title">Todoist Manager</h1>
+            <select id="project-select" class="topbar-select hidden" onchange="loadTasks()">
+                <option value="">Projekt w&auml;hlen...</option>
+            </select>
             <div id="stats-top" class="stats"></div>
         </div>
 
@@ -67,7 +64,7 @@
                     </div>
                 </div>
                 <div class="toggle-group" id="assignee-toggle-group" style="display:none">
-                    <span class="toggle-label">Verantwortlich</span>
+                    <span class="toggle-label">Verantw.</span>
                     <div class="toggle-buttons" id="filter-assignee-toggles"></div>
                 </div>
             </div>
@@ -134,8 +131,6 @@
         <!-- Toast -->
         <div id="toast" class="toast hidden"></div>
     </div>
-
-    <div id="sidebar-overlay" class="sidebar-overlay hidden" onclick="toggleSidebar()"></div>
 
     <script src="app.js"></script>
 </body>
