@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Todoist Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Todoist Manager</h1>
+        </header>
+
+        <!-- Token Input -->
+        <section id="auth-section" class="card">
+            <h2>API-Token eingeben</h2>
+            <p class="hint">Du findest deinen Token unter <strong>Todoist &rarr; Einstellungen &rarr; Integrationen &rarr; Entwickler</strong>.</p>
+            <div class="token-row">
+                <input type="password" id="token-input" placeholder="Todoist API-Token">
+                <button id="connect-btn" onclick="connect()">Verbinden</button>
+            </div>
+            <p id="auth-error" class="error hidden"></p>
+        </section>
+
+        <!-- Project Selection -->
+        <section id="project-section" class="card hidden">
+            <h2>Projekt ausw&auml;hlen</h2>
+            <select id="project-select" onchange="loadTasks()">
+                <option value="">-- Projekt w&auml;hlen --</option>
+            </select>
+        </section>
+
+        <!-- Filters & Actions -->
+        <section id="filter-section" class="card hidden">
+            <h2>Filter &amp; Aktionen</h2>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label for="filter-search">Suche</label>
+                    <input type="text" id="filter-search" placeholder="Aufgabe suchen..." oninput="applyFilters()">
+                </div>
+                <div class="filter-group">
+                    <label for="filter-priority">Priorit&auml;t</label>
+                    <select id="filter-priority" onchange="applyFilters()">
+                        <option value="">Alle</option>
+                        <option value="4">P1 (Dringend)</option>
+                        <option value="3">P2 (Hoch)</option>
+                        <option value="2">P3 (Mittel)</option>
+                        <option value="1">P4 (Normal)</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="filter-label">Label</label>
+                    <select id="filter-label" onchange="applyFilters()">
+                        <option value="">Alle</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="filter-due">F&auml;lligkeit</label>
+                    <select id="filter-due" onchange="applyFilters()">
+                        <option value="">Alle</option>
+                        <option value="overdue">&Uuml;berf&auml;llig</option>
+                        <option value="today">Heute</option>
+                        <option value="week">Diese Woche</option>
+                        <option value="nodue">Ohne Datum</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="filter-status">Status</label>
+                    <select id="filter-status" onchange="applyFilters()">
+                        <option value="open">Offen</option>
+                        <option value="completed">Erledigt</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="action-row">
+                <div class="selection-info">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
+                        Alle ausw&auml;hlen
+                    </label>
+                    <span id="selection-count">0 ausgew&auml;hlt</span>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn-danger" onclick="reopenSelected()" title="Ausgew&auml;hlte Aufgaben als unerledigt markieren">Als unerledigt markieren</button>
+                    <button class="btn-success" onclick="completeSelected()" title="Ausgew&auml;hlte Aufgaben als erledigt markieren">Als erledigt markieren</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Task Table -->
+        <section id="task-section" class="card hidden">
+            <div id="loading" class="hidden">
+                <div class="spinner"></div>
+                <span>Lade Aufgaben...</span>
+            </div>
+            <div class="table-wrapper">
+                <table id="task-table">
+                    <thead>
+                        <tr>
+                            <th class="col-check"></th>
+                            <th class="col-task sortable" onclick="sortBy('content')">Aufgabe <span class="sort-icon"></span></th>
+                            <th class="col-priority sortable" onclick="sortBy('priority')">Priorit&auml;t <span class="sort-icon"></span></th>
+                            <th class="col-due sortable" onclick="sortBy('due')">F&auml;lligkeit <span class="sort-icon"></span></th>
+                            <th class="col-labels">Labels</th>
+                            <th class="col-section sortable" onclick="sortBy('section')">Abschnitt <span class="sort-icon"></span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="task-body"></tbody>
+                </table>
+            </div>
+            <p id="no-tasks" class="hidden">Keine Aufgaben gefunden.</p>
+            <p id="task-count" class="task-count"></p>
+        </section>
+
+        <!-- Status Toast -->
+        <div id="toast" class="toast hidden"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
