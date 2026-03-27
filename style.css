@@ -396,6 +396,14 @@ tbody td {
     to { transform: translateY(0); opacity: 1; }
 }
 
+/* Footer */
+.version-footer {
+    text-align: center;
+    padding: 16px 0;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .filter-row {
