@@ -1,386 +1,362 @@
 const API_BASE = 'https://api.todoist.com/api/v1';
 
 let token = '';
-let allTasks = [];       // all tasks from cache (open + completed combined)
-let filteredTasks = [];  // after filters applied
-let sections = {};       // id -> name
-let collaborators = {};  // userId -> name
+let allTasks = [];
+let filteredTasks = [];
+let sections = {};
+let collaborators = {};
 let selectedIds = new Set();
 let sortField = 'content';
 let sortAsc = true;
-let collapsedSections = new Set();
+let collapsedIds = new Set(); // section IDs and parent task IDs
+let ctxTaskId = null;
 
-// ── Task Cache ──
+// ── Cache ──
 const taskCache = {};
 const CACHE_TTL = 5 * 60 * 1000;
+function getCached(pid) { const e = taskCache[pid]; return e && Date.now() - e.ts < CACHE_TTL ? e : null; }
+function invalidateCache(pid) { delete taskCache[pid]; }
 
-function getCached(projectId) {
-    const entry = taskCache[projectId];
-    if (!entry) return null;
-    if (Date.now() - entry.ts > CACHE_TTL) return null;
-    return entry;
-}
-
-function invalidateCache(projectId) {
-    delete taskCache[projectId];
-}
-
-// ── API Helpers ──
-
-async function api(method, path, body = null) {
-    const headers = { 'Authorization': `Bearer ${token}` };
-    if (body) headers['Content-Type'] = 'application/json';
-    const opts = { method, headers };
+// ── API ──
+async function api(method, path, body) {
+    const h = { 'Authorization': `Bearer ${token}` };
+    if (body) h['Content-Type'] = 'application/json';
+    const opts = { method, headers: h };
     if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(`${API_BASE}${path}`, opts);
-    if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`API ${res.status}: ${text}`);
-    }
-    if (res.status === 204) return null;
-    return res.json();
+    const r = await fetch(`${API_BASE}${path}`, opts);
+    if (!r.ok) throw new Error(`API ${r.status}: ${await r.text()}`);
+    return r.status === 204 ? null : r.json();
 }
 
 async function apiPaginated(path) {
-    let allResults = [];
-    let cursor = null;
+    let all = [], cursor = null;
     do {
-        let url = cursor
-            ? path + (path.includes('?') ? '&' : '?') + 'cursor=' + cursor
-            : path;
-        if (!url.includes('limit=')) {
-            url += (url.includes('?') ? '&' : '?') + 'limit=200';
-        }
-        const data = await api('GET', url);
-        if (Array.isArray(data)) { allResults = allResults.concat(data); break; }
-        allResults = allResults.concat(data.results || []);
-        cursor = data.nextCursor || null;
+        let url = cursor ? path + (path.includes('?') ? '&' : '?') + 'cursor=' + cursor : path;
+        if (!url.includes('limit=')) url += (url.includes('?') ? '&' : '?') + 'limit=200';
+        const d = await api('GET', url);
+        if (Array.isArray(d)) return all.concat(d);
+        all = all.concat(d.results || []);
+        cursor = d.nextCursor || null;
     } while (cursor);
-    return allResults;
+    return all;
 }
 
-async function fetchAllCompletedTasks(projectId) {
-    let allItems = [];
-    let offset = 0;
-    const pageSize = 200;
+async function fetchAllCompleted(projectId) {
+    let all = [], offset = 0;
     do {
-        const data = await api('GET', `/tasks/completed?projectId=${projectId}&limit=${pageSize}&offset=${offset}`);
-        const items = data.items || data.results || [];
-        allItems = allItems.concat(items);
-        if (items.length < pageSize) break;
+        const d = await api('GET', `/tasks/completed?projectId=${projectId}&limit=200&offset=${offset}`);
+        const items = d.items || d.results || [];
+        all = all.concat(items);
+        if (items.length < 200) break;
         offset += items.length;
     } while (true);
-
-    return allItems.map(item => ({
-        id: item.taskId || item.task_id || item.id,
-        content: item.content,
-        description: '',
-        priority: 1,
-        labels: [],
-        due: null,
-        sectionId: item.sectionId || item.section_id || null,
-        parentId: item.parentId || item.parent_id || null,
-        responsibleUid: item.responsibleUid || null,
-        _status: 'completed',
+    return all.map(i => ({
+        id: i.taskId || i.task_id || i.id, content: i.content, description: '',
+        priority: i.priority || 1, labels: i.labels || [], due: i.due || null,
+        sectionId: i.sectionId || i.section_id || null,
+        parentId: i.parentId || i.parent_id || null,
+        responsibleUid: i.responsibleUid || null, _status: 'completed',
     }));
 }
 
-// ── Parallel execution with concurrency ──
+// ── Parallel exec ──
 async function parallelLimit(tasks, limit, onProgress) {
-    let completed = 0, failed = 0;
-    let index = 0;
-    async function runNext() {
-        while (index < tasks.length) {
-            const i = index++;
-            try { await tasks[i](); completed++; }
-            catch (e) { failed++; }
-            if (onProgress) await onProgress(completed + failed, tasks.length, completed, failed);
+    let ok = 0, fail = 0, idx = 0;
+    async function run() {
+        while (idx < tasks.length) {
+            const i = idx++;
+            try { await tasks[i](); ok++; } catch { fail++; }
+            if (onProgress) await onProgress(ok + fail, tasks.length);
         }
     }
-    await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, () => runNext()));
-    return { completed, failed };
+    await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, run));
+    return { completed: ok, failed: fail };
 }
 
-// ── Progress Bar ──
-async function showProgress(current, total, label) {
+// ── Progress ──
+async function showProgress(cur, total, label) {
     const bar = document.getElementById('progress-bar');
-    if (!bar) return;
     bar.classList.remove('hidden');
-    const pct = Math.round((current / total) * 100);
-    bar.querySelector('.progress-fill').style.width = pct + '%';
-    bar.querySelector('.progress-text').textContent = `${label}: ${current} / ${total}`;
+    bar.querySelector('.progress-fill').style.width = Math.round(cur / total * 100) + '%';
+    bar.querySelector('.progress-text').textContent = `${label}: ${cur}/${total}`;
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 }
+function hideProgress() { document.getElementById('progress-bar').classList.add('hidden'); }
 
-function hideProgress() {
-    const bar = document.getElementById('progress-bar');
-    if (bar) bar.classList.add('hidden');
+// ── Sidebar ──
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay').classList.toggle('hidden');
 }
 
-// ── Toggle Filter Buttons ──
-function toggleFilter(btn) {
-    btn.classList.toggle('active');
+// ── Toggle Buttons ──
+function handleToggle(e) {
+    const btn = e.currentTarget;
+    const container = btn.parentElement;
+    const isMulti = e.ctrlKey || e.metaKey;
+
+    if (btn.dataset.value === '__select_all__') {
+        // "Alle" meta button: toggle all others
+        const others = container.querySelectorAll('.toggle-btn:not([data-value="__select_all__"])');
+        const allActive = [...others].every(b => b.classList.contains('active'));
+        others.forEach(b => b.classList.toggle('active', !allActive));
+        applyFilters();
+        return;
+    }
+
+    if (isMulti) {
+        btn.classList.toggle('active');
+    } else {
+        const siblings = container.querySelectorAll('.toggle-btn:not([data-value="__select_all__"])');
+        const wasOnlyActive = btn.classList.contains('active') &&
+            [...siblings].filter(b => b.classList.contains('active')).length === 1;
+        if (wasOnlyActive) {
+            // Clicking the only active button → activate all
+            siblings.forEach(b => b.classList.add('active'));
+        } else {
+            siblings.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+    }
     applyFilters();
 }
 
+// Mobile: long press = multi-select
+let longPressTimer = null;
+function handleTouchStart(e) {
+    const btn = e.currentTarget;
+    longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        btn.classList.toggle('active');
+        applyFilters();
+    }, 500);
+}
+function handleTouchEnd(e) {
+    if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+        // Normal tap → exclusive
+        const btn = e.currentTarget;
+        const container = btn.parentElement;
+        if (btn.dataset.value === '__select_all__') {
+            handleToggle(e);
+            return;
+        }
+        const siblings = container.querySelectorAll('.toggle-btn:not([data-value="__select_all__"])');
+        const wasOnlyActive = btn.classList.contains('active') &&
+            [...siblings].filter(b => b.classList.contains('active')).length === 1;
+        if (wasOnlyActive) {
+            siblings.forEach(b => b.classList.add('active'));
+        } else {
+            siblings.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+        applyFilters();
+        e.preventDefault();
+    }
+}
+
+function bindToggleButtons() {
+    document.querySelectorAll('.toggle-btn').forEach(btn => {
+        btn.onclick = handleToggle;
+        btn.addEventListener('touchstart', handleTouchStart, { passive: true });
+        btn.addEventListener('touchend', handleTouchEnd);
+    });
+}
+
 function getActiveValues(containerId) {
-    const btns = document.querySelectorAll(`#${containerId} .toggle-btn.active`);
-    return [...btns].map(b => b.dataset.value);
+    return [...document.querySelectorAll(`#${containerId} .toggle-btn.active:not([data-value="__select_all__"])`)].map(b => b.dataset.value);
 }
 
 // ── Connect ──
 async function connect() {
     token = document.getElementById('token-input').value.trim();
-    const errEl = document.getElementById('auth-error');
-    errEl.classList.add('hidden');
-
-    if (!token) {
-        errEl.textContent = 'Bitte Token eingeben.';
-        errEl.classList.remove('hidden');
-        return;
-    }
+    const err = document.getElementById('auth-error');
+    err.classList.add('hidden');
+    if (!token) { err.textContent = 'Bitte Token eingeben.'; err.classList.remove('hidden'); return; }
 
     try {
-        const res = await fetch(`${API_BASE}/projects`, {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${token}` },
-        });
-
-        if (!res.ok) {
-            const body = await res.text().catch(() => '');
-            if (res.status === 401 || res.status === 403) {
-                errEl.textContent = `Authentifizierung fehlgeschlagen (HTTP ${res.status}). Token ungültig oder abgelaufen.`;
-            } else if (res.status === 410) {
-                errEl.textContent = `API-Endpunkt nicht mehr verfügbar (HTTP 410).`;
-            } else {
-                errEl.textContent = `API-Fehler HTTP ${res.status}: ${body.substring(0, 200)}`;
-            }
-            errEl.classList.remove('hidden');
-            return;
+        const r = await fetch(`${API_BASE}/projects`, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!r.ok) {
+            err.textContent = r.status === 401 || r.status === 403
+                ? `Token ungültig (HTTP ${r.status}).`
+                : `API-Fehler HTTP ${r.status}`;
+            err.classList.remove('hidden'); return;
         }
-
-        const data = await res.json();
+        const data = await r.json();
         const projects = data.results || data;
-
-        const select = document.getElementById('project-select');
-        select.innerHTML = '<option value="">-- Projekt wählen --</option>';
-        projects.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.id;
-            opt.textContent = p.name;
-            select.appendChild(opt);
-        });
+        const sel = document.getElementById('project-select');
+        sel.innerHTML = '<option value="">-- wählen --</option>';
+        projects.forEach(p => { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o); });
         document.getElementById('project-section').classList.remove('hidden');
         localStorage.setItem('todoist_token', token);
-        showToast('Verbunden! Bitte Projekt auswählen.', 'success');
+        showToast(`${projects.length} Projekte geladen.`, 'success');
     } catch (e) {
-        if (e instanceof TypeError) {
-            errEl.textContent = 'Netzwerkfehler: Keine Verbindung möglich. Internetverbindung/Adblocker prüfen.';
-        } else {
-            errEl.textContent = `Fehler: ${e.message}`;
-        }
-        errEl.classList.remove('hidden');
-        console.error('Connect error:', e);
+        err.textContent = e instanceof TypeError ? 'Netzwerkfehler. Internet/Adblocker prüfen.' : e.message;
+        err.classList.remove('hidden');
     }
 }
 
 // ── Load Tasks ──
-async function loadTasks(forceRefresh = false) {
-    const projectId = document.getElementById('project-select').value;
-    if (!projectId) return;
+async function loadTasks(force) {
+    const pid = document.getElementById('project-select').value;
+    if (!pid) return;
 
-    const filterSection = document.getElementById('filter-section');
-    const taskSection = document.getElementById('task-section');
-    const loading = document.getElementById('loading');
+    document.getElementById('project-title').textContent =
+        document.getElementById('project-select').selectedOptions[0]?.textContent || 'Todoist Manager';
 
-    if (!forceRefresh) {
-        const cached = getCached(projectId);
-        if (cached) {
-            sections = cached.sections;
-            collaborators = cached.collaborators;
-            allTasks = [...cached.open, ...cached.completed];
-            filterSection.classList.remove('hidden');
-            taskSection.classList.remove('hidden');
-            populateAssigneeToggles();
-            populateLabelFilter(allTasks);
-            applyFilters();
-            showToast(`${allTasks.length} Aufgaben (Cache).`, 'success');
-            return;
+    if (!force) {
+        const c = getCached(pid);
+        if (c) {
+            sections = c.sections; collaborators = c.collaborators; allTasks = [...c.open, ...c.completed];
+            showUI(); showToast(`${allTasks.length} Aufgaben (Cache).`, 'success'); return;
         }
     }
 
-    filterSection.classList.remove('hidden');
-    taskSection.classList.remove('hidden');
-    loading.classList.remove('hidden');
+    document.getElementById('filter-section').classList.remove('hidden');
+    document.getElementById('task-section').classList.remove('hidden');
+    document.getElementById('loading').classList.remove('hidden');
     document.getElementById('task-body').innerHTML = '';
-    document.getElementById('no-tasks').classList.add('hidden');
 
     try {
-        const [openTasks, completedTasks, sectionList, collabList] = await Promise.all([
-            apiPaginated(`/tasks?projectId=${projectId}`),
-            fetchAllCompletedTasks(projectId),
-            apiPaginated(`/sections?projectId=${projectId}`),
-            apiPaginated(`/projects/${projectId}/collaborators`).catch(() => []),
+        const [open, completed, secList, collabList] = await Promise.all([
+            apiPaginated(`/tasks?projectId=${pid}`),
+            fetchAllCompleted(pid),
+            apiPaginated(`/sections?projectId=${pid}`),
+            apiPaginated(`/projects/${pid}/collaborators`).catch(() => []),
         ]);
+        open.forEach(t => { t._status = 'open'; });
 
-        openTasks.forEach(t => { t._status = 'open'; });
-
-        const secs = {};
-        sectionList.forEach(s => { secs[s.id] = s.name; });
-        sections = secs;
-
-        const collabs = {};
-        collabList.forEach(c => { collabs[c.id] = c.name || c.email || c.id; });
-        // Also extract assignees from tasks themselves if collaborators endpoint failed
-        [...openTasks, ...completedTasks].forEach(t => {
+        const secs = {}; secList.forEach(s => { secs[s.id] = s.name; }); sections = secs;
+        const cols = {}; collabList.forEach(c => { cols[c.id] = c.name || c.email || c.id; });
+        [...open, ...completed].forEach(t => {
             const uid = t.responsibleUid || t.assigneeId || t.assignee_id;
-            if (uid && !collabs[uid]) collabs[uid] = uid;
+            if (uid && !cols[uid]) cols[uid] = uid;
         });
-        collaborators = collabs;
+        collaborators = cols;
 
-        taskCache[projectId] = {
-            open: openTasks,
-            completed: completedTasks,
-            sections: secs,
-            collaborators: collabs,
-            ts: Date.now(),
-        };
-
-        allTasks = [...openTasks, ...completedTasks];
-        populateAssigneeToggles();
-        populateLabelFilter(allTasks);
-        applyFilters();
-        showToast(`${openTasks.length} offen + ${completedTasks.length} erledigt geladen.`, 'success');
+        taskCache[pid] = { open, completed, sections: secs, collaborators: cols, ts: Date.now() };
+        allTasks = [...open, ...completed];
+        showUI();
+        showToast(`${open.length} offen + ${completed.length} erledigt.`, 'success');
     } catch (e) {
         showToast('Fehler: ' + e.message, 'error');
     } finally {
-        loading.classList.add('hidden');
+        document.getElementById('loading').classList.add('hidden');
     }
+}
+
+function showUI() {
+    populateAssigneeToggles();
+    populateLabelFilter();
+    document.getElementById('filter-section').classList.remove('hidden');
+    document.getElementById('task-section').classList.remove('hidden');
+    applyFilters();
 }
 
 // ── Populate dynamic filters ──
 function populateAssigneeToggles() {
-    const container = document.getElementById('filter-assignee-toggles');
+    const c = document.getElementById('filter-assignee-toggles');
     const names = Object.entries(collaborators);
-    if (names.length === 0) {
-        container.innerHTML = '<button class="toggle-btn active" data-value="__all__" onclick="toggleFilter(this)">Alle</button>';
-        return;
-    }
-    container.innerHTML = '';
-    // "Alle" toggle
-    const allBtn = document.createElement('button');
-    allBtn.className = 'toggle-btn active';
-    allBtn.dataset.value = '__all__';
-    allBtn.textContent = 'Alle';
-    allBtn.onclick = function() { toggleFilter(this); };
-    container.appendChild(allBtn);
-    // "Keine" toggle (unassigned)
-    const noneBtn = document.createElement('button');
-    noneBtn.className = 'toggle-btn active';
+    const group = document.getElementById('assignee-toggle-group');
+    if (names.length === 0) { group.style.display = 'none'; return; }
+    group.style.display = '';
+    c.innerHTML = '';
+
+    const allBtn = mk('button', 'toggle-btn meta-btn', 'Alle');
+    allBtn.dataset.value = '__select_all__';
+    c.appendChild(allBtn);
+
+    const noneBtn = mk('button', 'toggle-btn active', 'Ohne');
     noneBtn.dataset.value = '__none__';
-    noneBtn.textContent = 'Ohne';
-    noneBtn.onclick = function() { toggleFilter(this); };
-    container.appendChild(noneBtn);
+    c.appendChild(noneBtn);
 
     names.forEach(([id, name]) => {
-        const btn = document.createElement('button');
-        btn.className = 'toggle-btn active';
-        btn.dataset.value = id;
-        btn.textContent = name;
-        btn.onclick = function() { toggleFilter(this); };
-        container.appendChild(btn);
+        const b = mk('button', 'toggle-btn active', name);
+        b.dataset.value = id;
+        c.appendChild(b);
     });
+    bindToggleButtons();
 }
 
-function populateLabelFilter(tasks) {
-    const labelSet = new Set();
-    tasks.forEach(t => (t.labels || []).forEach(l => labelSet.add(l)));
-    const select = document.getElementById('filter-label');
-    const current = select.value;
-    select.innerHTML = '<option value="">Alle</option>';
-    [...labelSet].sort().forEach(l => {
-        const opt = document.createElement('option');
-        opt.value = l;
-        opt.textContent = l;
-        select.appendChild(opt);
-    });
-    select.value = current;
+function populateLabelFilter() {
+    const labels = new Set();
+    allTasks.forEach(t => (t.labels || []).forEach(l => labels.add(l)));
+    const sel = document.getElementById('filter-label');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Label: Alle</option>';
+    [...labels].sort().forEach(l => { const o = document.createElement('option'); o.value = l; o.textContent = l; sel.appendChild(o); });
+    sel.value = cur;
+}
+
+function mk(tag, cls, text) {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text) el.textContent = text;
+    return el;
 }
 
 // ── Hierarchy ──
 function buildHierarchy(tasks) {
-    const taskMap = new Map();
-    tasks.forEach(t => taskMap.set(t.id, t));
-
+    const map = new Map(); tasks.forEach(t => map.set(t.id, t));
     tasks.forEach(t => {
-        let depth = 0;
-        let current = t;
-        let pid = current.parentId || current.parent_id;
-        while (pid && taskMap.has(pid)) {
-            depth++;
-            current = taskMap.get(pid);
-            pid = current.parentId || current.parent_id;
-        }
+        let depth = 0, cur = t, pid = cur.parentId || cur.parent_id;
+        while (pid && map.has(pid)) { depth++; cur = map.get(pid); pid = cur.parentId || cur.parent_id; }
         t._depth = depth;
     });
-
-    const roots = tasks.filter(t => t._depth === 0);
-    const childrenByParent = new Map();
+    const byParent = new Map();
     tasks.filter(t => t._depth > 0).forEach(c => {
         const pid = c.parentId || c.parent_id;
-        if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
-        childrenByParent.get(pid).push(c);
+        if (!byParent.has(pid)) byParent.set(pid, []);
+        byParent.get(pid).push(c);
     });
-
     const result = [];
-    function addWithChildren(task) {
-        result.push(task);
-        (childrenByParent.get(task.id) || []).forEach(kid => addWithChildren(kid));
-    }
-    roots.forEach(r => addWithChildren(r));
-
-    // Orphans
-    tasks.forEach(t => {
-        if (!result.includes(t)) { t._depth = 0; result.push(t); }
-    });
+    function add(t) { result.push(t); t._hasChildren = byParent.has(t.id); (byParent.get(t.id) || []).forEach(add); }
+    tasks.filter(t => t._depth === 0).forEach(add);
+    tasks.forEach(t => { if (!result.includes(t)) { t._depth = 0; result.push(t); } });
     return result;
+}
+
+function isHiddenByCollapse(task) {
+    // Walk up parents: if any ancestor is collapsed, hide this task
+    const map = new Map(); filteredTasks.forEach(t => map.set(t.id, t));
+    let pid = task.parentId || task.parent_id;
+    while (pid) {
+        if (collapsedIds.has(pid)) return true;
+        const parent = map.get(pid);
+        if (!parent) break;
+        pid = parent.parentId || parent.parent_id;
+    }
+    // Check section collapse
+    const sid = task.sectionId || task.section_id || '__none__';
+    if (collapsedIds.has('sec_' + sid)) return true;
+    return false;
 }
 
 // ── Filters ──
 function applyFilters() {
     const search = document.getElementById('filter-search').value.toLowerCase();
     const label = document.getElementById('filter-label').value;
-    const activeStatuses = getActiveValues('filter-status-toggles');
-    const activePriorities = getActiveValues('filter-priority-toggles');
-    const activeAssignees = getActiveValues('filter-assignee-toggles');
+    const statuses = getActiveValues('filter-status-toggles');
+    const priorities = getActiveValues('filter-priority-toggles');
+    const assignees = getActiveValues('filter-assignee-toggles');
 
     filteredTasks = allTasks.filter(t => {
-        // Search
-        if (search && !t.content.toLowerCase().includes(search) &&
-            !(t.description || '').toLowerCase().includes(search)) return false;
-
-        // Status
-        if (activeStatuses.length > 0) {
-            const isCompleted = t._status === 'completed' || t.is_completed || t.checked;
-            const taskStatus = isCompleted ? 'completed' : 'open';
-            if (!activeStatuses.includes(taskStatus)) return false;
+        if (search && !t.content.toLowerCase().includes(search) && !(t.description || '').toLowerCase().includes(search)) return false;
+        if (statuses.length > 0 && statuses.length < 2) {
+            const s = (t._status === 'completed' || t.is_completed || t.checked) ? 'completed' : 'open';
+            if (!statuses.includes(s)) return false;
         }
-
-        // Priority
-        if (activePriorities.length > 0 && activePriorities.length < 4) {
-            if (!activePriorities.includes(String(t.priority))) return false;
+        if (priorities.length > 0 && priorities.length < 4) {
+            if (!priorities.includes(String(t.priority))) return false;
         }
-
-        // Label
         if (label && !(t.labels || []).includes(label)) return false;
-
-        // Assignee
-        if (activeAssignees.length > 0 && !activeAssignees.includes('__all__')) {
+        if (assignees.length > 0) {
             const uid = t.responsibleUid || t.assigneeId || t.assignee_id;
-            if (!uid && !activeAssignees.includes('__none__')) return false;
-            if (uid && !activeAssignees.includes(uid)) return false;
+            if (!uid && !assignees.includes('__none__')) return false;
+            if (uid && !assignees.includes(uid) && !assignees.includes('__none__')) return false;
+            if (uid && !assignees.includes(uid)) return false;
         }
-
         return true;
     });
 
@@ -388,23 +364,19 @@ function applyFilters() {
     filteredTasks = buildHierarchy(filteredTasks);
     selectedIds.clear();
     document.getElementById('select-all').checked = false;
-    updateSelectionCount();
+    updateSelectionUI();
     renderTable();
+    updateStats();
 }
 
 // ── Sorting ──
 function sortBy(field) {
-    if (sortField === field) sortAsc = !sortAsc;
-    else { sortField = field; sortAsc = true; }
-
+    if (sortField === field) sortAsc = !sortAsc; else { sortField = field; sortAsc = true; }
     document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
-    const sortableThs = document.querySelectorAll('th.sortable');
+    const ths = document.querySelectorAll('th.sortable');
     const idx = ['content', 'priority', 'due', 'assignee'].indexOf(field);
-    if (idx >= 0 && sortableThs[idx]) sortableThs[idx].classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
-
-    sortTasks();
-    filteredTasks = buildHierarchy(filteredTasks);
-    renderTable();
+    if (idx >= 0 && ths[idx]) ths[idx].classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+    sortTasks(); filteredTasks = buildHierarchy(filteredTasks); renderTable();
 }
 
 function sortTasks() {
@@ -414,283 +386,227 @@ function sortTasks() {
             case 'content': va = a.content.toLowerCase(); vb = b.content.toLowerCase(); break;
             case 'priority': va = a.priority; vb = b.priority; return sortAsc ? vb - va : va - vb;
             case 'due': va = a.due ? a.due.date : 'z'; vb = b.due ? b.due.date : 'z'; break;
-            case 'assignee': va = getAssigneeName(a).toLowerCase(); vb = getAssigneeName(b).toLowerCase(); break;
-            default: va = ''; vb = '';
+            case 'assignee': va = getAssignee(a).toLowerCase(); vb = getAssignee(b).toLowerCase(); break;
+            default: return 0;
         }
-        if (va < vb) return sortAsc ? -1 : 1;
-        if (va > vb) return sortAsc ? 1 : -1;
-        return 0;
+        return va < vb ? (sortAsc ? -1 : 1) : va > vb ? (sortAsc ? 1 : -1) : 0;
     });
+}
+
+// ── Helpers ──
+const PRIO = { 4: 'P1', 3: 'P2', 2: 'P3', 1: 'P4' };
+function getSid(t) { return t.sectionId || t.section_id || null; }
+function getAssignee(t) { const u = t.responsibleUid || t.assigneeId || t.assignee_id; return u ? (collaborators[u] || u) : ''; }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtDate(s) { return new Date(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
+
+// ── Stats ──
+function updateStats() {
+    const total = allTasks.length;
+    const openCount = allTasks.filter(t => t._status !== 'completed' && !t.is_completed && !t.checked).length;
+    const completedCount = total - openCount;
+    const visible = filteredTasks.length;
+    const txt = `${visible} von ${total} | ${openCount} offen, ${completedCount} erledigt`;
+    document.getElementById('stats-top').textContent = txt;
+    document.getElementById('stats-bottom').textContent = txt;
 }
 
 // ── Rendering ──
-const PRIORITY_LABELS = { 4: 'P1', 3: 'P2', 2: 'P3', 1: 'P4' };
-
-function getSectionId(task) {
-    return task.sectionId || task.section_id || null;
-}
-
-function getSectionName(task) {
-    const sid = getSectionId(task);
-    return sid ? (sections[sid] || '') : '';
-}
-
-function getAssigneeName(task) {
-    const uid = task.responsibleUid || task.assigneeId || task.assignee_id;
-    if (!uid) return '';
-    return collaborators[uid] || uid;
-}
-
 function renderTable() {
     const tbody = document.getElementById('task-body');
     const noTasks = document.getElementById('no-tasks');
-    const taskCount = document.getElementById('task-count');
-    const sectionControls = document.getElementById('section-controls');
+    const secCtrl = document.getElementById('section-controls');
 
-    if (filteredTasks.length === 0) {
-        tbody.innerHTML = '';
-        noTasks.classList.remove('hidden');
-        taskCount.textContent = '';
-        sectionControls.classList.add('hidden');
-        return;
-    }
-
+    if (filteredTasks.length === 0) { tbody.innerHTML = ''; noTasks.classList.remove('hidden'); secCtrl.style.display = 'none'; return; }
     noTasks.classList.add('hidden');
 
     // Group by section
-    const groups = [];
-    const groupMap = new Map();
+    const groups = []; const gmap = new Map();
     filteredTasks.forEach(t => {
-        const sid = getSectionId(t) || '__none__';
-        if (!groupMap.has(sid)) {
-            const g = { id: sid, name: sid === '__none__' ? '(Ohne Abschnitt)' : (sections[sid] || 'Unbekannt'), tasks: [] };
-            groups.push(g);
-            groupMap.set(sid, g);
-        }
-        groupMap.get(sid).tasks.push(t);
+        const sid = getSid(t) || '__none__';
+        if (!gmap.has(sid)) { const g = { id: sid, name: sid === '__none__' ? '(Ohne Abschnitt)' : (sections[sid] || '?'), tasks: [] }; groups.push(g); gmap.set(sid, g); }
+        gmap.get(sid).tasks.push(t);
     });
 
     const hasSections = groups.length > 1 || groups[0]?.id !== '__none__';
-    sectionControls.classList.toggle('hidden', !hasSections);
+    secCtrl.style.display = hasSections ? '' : 'none';
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    const today = new Date(); today.setHours(0, 0, 0, 0);
     let html = '';
-    groups.forEach(group => {
-        const isCollapsed = collapsedSections.has(group.id);
+
+    groups.forEach(g => {
+        const secKey = 'sec_' + g.id;
+        const secCollapsed = collapsedIds.has(secKey);
         if (hasSections) {
-            html += `<tr class="section-header ${isCollapsed ? 'collapsed' : ''}" onclick="toggleSection('${group.id}')">
-                <td colspan="7">
-                    <span class="section-toggle">&#9660;</span>
-                    ${escapeHtml(group.name)}
-                    <span class="section-count">(${group.tasks.length})</span>
-                </td>
-            </tr>`;
+            html += `<tr class="section-row ${secCollapsed ? 'collapsed' : ''}" onclick="toggleCollapse('${secKey}')">
+                <td colspan="8"><span class="section-toggle">&#9660;</span> ${esc(g.name)} <span class="section-count">(${g.tasks.length})</span></td></tr>`;
         }
-        if (!isCollapsed) {
-            group.tasks.forEach(t => {
-                html += renderTaskRow(t, today);
+        if (!secCollapsed) {
+            g.tasks.forEach(t => {
+                if (isHiddenByCollapse(t)) return;
+                html += taskRow(t, today);
             });
         }
     });
 
     tbody.innerHTML = html;
-    taskCount.textContent = `${filteredTasks.length} Aufgabe${filteredTasks.length !== 1 ? 'n' : ''} angezeigt`;
 }
 
-function renderTaskRow(t, today) {
-    const checked = selectedIds.has(t.id) ? 'checked' : '';
-    const selectedClass = selectedIds.has(t.id) ? 'selected' : '';
+function taskRow(t, today) {
+    const sel = selectedIds.has(t.id);
     const depth = t._depth || 0;
-    const indent = depth > 0 ? `padding-left: ${depth * 24 + 12}px` : '';
-    const hierarchyPrefix = depth > 0 ? '<span class="subtask-indicator">&#x2514; </span>' : '';
+    const pad = depth > 0 ? `padding-left:${depth * 20 + 10}px` : '';
+    const prefix = depth > 0 ? '<span class="subtask-indicator">&#x2514; </span>' : '';
 
-    const desc = t.description
-        ? `<span class="task-description">${escapeHtml(t.description.substring(0, 80))}${t.description.length > 80 ? '...' : ''}</span>`
-        : '';
-
-    const priorityBadge = `<span class="priority-badge priority-${t.priority}">${PRIORITY_LABELS[t.priority] || 'P4'}</span>`;
-
-    let dueHtml = '—';
-    if (t.due) {
-        const dueDate = new Date(t.due.date);
-        const isOverdue = dueDate < today;
-        const cls = isOverdue ? 'due-date overdue' : 'due-date';
-        dueHtml = `<span class="${cls}">${formatDate(t.due.date)}${isOverdue ? ' !' : ''}</span>`;
+    // Collapse toggle for parents
+    let collapseBtn = '';
+    if (t._hasChildren) {
+        const isColl = collapsedIds.has(t.id);
+        collapseBtn = `<span class="collapse-toggle ${isColl ? 'collapsed' : ''}" onclick="event.stopPropagation();toggleCollapse('${t.id}')">&#9660;</span>`;
     }
 
-    const labels = (t.labels || []).map(l => `<span class="label-tag">${escapeHtml(l)}</span>`).join('');
-    const assignee = getAssigneeName(t);
+    const desc = t.description ? `<span class="task-description">${esc(t.description.substring(0, 80))}${t.description.length > 80 ? '...' : ''}</span>` : '';
+    const isComp = t._status === 'completed' || t.is_completed || t.checked;
+    const statusCb = `<input type="checkbox" class="status-cb" ${isComp ? 'checked' : ''} onchange="toggleTaskStatus('${t.id}',this)" title="${isComp ? 'Unerledigt' : 'Erledigt'}">`;
 
-    const isCompleted = t._status === 'completed' || t.is_completed || t.checked;
-    const statusChecked = isCompleted ? 'checked' : '';
-    const statusCheckbox = `<input type="checkbox" class="status-cb" ${statusChecked} onchange="toggleTaskStatus('${t.id}', this)" title="${isCompleted ? 'Als unerledigt markieren' : 'Als erledigt markieren'}">`;
+    let dueHtml = '';
+    if (t.due) {
+        const d = new Date(t.due.date), ov = d < today;
+        dueHtml = `<span class="due-date${ov ? ' overdue' : ''}">${fmtDate(t.due.date)}${ov ? ' !' : ''}</span>`;
+    }
 
-    return `<tr class="${selectedClass}" data-id="${t.id}">
-        <td class="col-check"><input type="checkbox" ${checked} onchange="toggleSelect('${t.id}')"></td>
-        <td style="${indent}"><div class="task-content">${hierarchyPrefix}<span>${escapeHtml(t.content)}</span>${desc}</div></td>
-        <td class="col-status">${statusCheckbox}</td>
-        <td>${priorityBadge}</td>
-        <td>${dueHtml}</td>
-        <td>${assignee ? escapeHtml(assignee) : '—'}</td>
+    const labels = (t.labels || []).map(l => `<span class="label-tag">${esc(l)}</span>`).join('');
+    const assignee = getAssignee(t);
+
+    return `<tr class="${sel ? 'selected' : ''}" data-id="${t.id}">
+        <td class="col-check"><input type="checkbox" ${sel ? 'checked' : ''} onchange="toggleSelect('${t.id}')"></td>
+        <td style="${pad}"><div class="task-content">${collapseBtn}${prefix}<span>${esc(t.content)}</span>${desc}</div></td>
+        <td class="col-status">${statusCb}</td>
+        <td><span class="priority-badge priority-${t.priority}">${PRIO[t.priority] || 'P4'}</span></td>
+        <td>${dueHtml || '—'}</td>
+        <td>${assignee ? esc(assignee) : '—'}</td>
         <td>${labels || '—'}</td>
+        <td class="col-actions"><button class="actions-btn" onclick="showCtxMenu(event,'${t.id}')">&#8943;</button></td>
     </tr>`;
 }
 
-// ── Inline Status Toggle ──
-async function toggleTaskStatus(taskId, checkbox) {
-    checkbox.disabled = true;
-    const projectId = document.getElementById('project-select').value;
-    const wasCompleted = !checkbox.checked; // inverted because change already happened
+// ── Collapse ──
+function toggleCollapse(id) { collapsedIds.has(id) ? collapsedIds.delete(id) : collapsedIds.add(id); renderTable(); }
+function expandAll() { collapsedIds.clear(); renderTable(); }
+function collapseAll() {
+    filteredTasks.forEach(t => { if (t._hasChildren) collapsedIds.add(t.id); });
+    const groups = new Set(); filteredTasks.forEach(t => groups.add('sec_' + (getSid(t) || '__none__')));
+    groups.forEach(id => collapsedIds.add(id));
+    renderTable();
+}
 
+// ── Context Menu ──
+function showCtxMenu(e, taskId) {
+    e.stopPropagation();
+    ctxTaskId = taskId;
+    const menu = document.getElementById('context-menu');
+    menu.classList.remove('hidden');
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu.style.top = rect.bottom + 4 + 'px';
+    menu.style.left = Math.min(rect.left, window.innerWidth - 220) + 'px';
+}
+
+function hideCtxMenu() { document.getElementById('context-menu').classList.add('hidden'); ctxTaskId = null; }
+
+async function ctxAction(action) {
+    const id = ctxTaskId;
+    hideCtxMenu();
+    if (!id) return;
+    const pid = document.getElementById('project-select').value;
     try {
-        if (checkbox.checked) {
-            await api('POST', `/tasks/${taskId}/close`);
-            showToast('Aufgabe als erledigt markiert.', 'success');
-        } else {
-            await api('POST', `/tasks/${taskId}/reopen`);
-            showToast('Aufgabe als unerledigt markiert.', 'success');
-        }
-        invalidateCache(projectId);
+        if (action === 'complete') await api('POST', `/tasks/${id}/close`);
+        else if (action === 'reopen') await api('POST', `/tasks/${id}/reopen`);
+        showToast(action === 'complete' ? 'Erledigt.' : 'Wieder geöffnet.', 'success');
+        invalidateCache(pid);
         await loadTasks(true);
-    } catch (e) {
-        checkbox.checked = wasCompleted;
-        checkbox.disabled = false;
-        showToast('Fehler: ' + e.message, 'error');
-    }
+    } catch (e) { showToast('Fehler: ' + e.message, 'error'); }
 }
 
-// ── Section Collapse ──
-function toggleSection(sectionId) {
-    if (collapsedSections.has(sectionId)) {
-        collapsedSections.delete(sectionId);
-    } else {
-        collapsedSections.add(sectionId);
-    }
-    renderTable();
-}
+document.addEventListener('click', e => {
+    if (!e.target.closest('.context-menu') && !e.target.closest('.actions-btn')) hideCtxMenu();
+});
 
-function expandAllSections() {
-    collapsedSections.clear();
-    renderTable();
-}
-
-function collapseAllSections() {
-    // Collect all section IDs from current render
-    const groups = new Set();
-    filteredTasks.forEach(t => {
-        groups.add(getSectionId(t) || '__none__');
-    });
-    groups.forEach(id => collapsedSections.add(id));
-    renderTable();
+// ── Inline status toggle ──
+async function toggleTaskStatus(taskId, cb) {
+    cb.disabled = true;
+    const pid = document.getElementById('project-select').value;
+    const was = !cb.checked;
+    try {
+        await api('POST', `/tasks/${taskId}/${cb.checked ? 'close' : 'reopen'}`);
+        showToast(cb.checked ? 'Erledigt.' : 'Wieder geöffnet.', 'success');
+        invalidateCache(pid);
+        await loadTasks(true);
+    } catch (e) { cb.checked = was; cb.disabled = false; showToast('Fehler: ' + e.message, 'error'); }
 }
 
 // ── Selection ──
 function toggleSelect(id) {
-    if (selectedIds.has(id)) selectedIds.delete(id);
-    else selectedIds.add(id);
-    updateSelectionCount();
+    selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id);
+    updateSelectionUI();
     const row = document.querySelector(`tr[data-id="${id}"]`);
     if (row) row.classList.toggle('selected', selectedIds.has(id));
-    document.getElementById('select-all').checked =
-        filteredTasks.length > 0 && selectedIds.size === filteredTasks.length;
 }
 
 function toggleSelectAll() {
-    const checked = document.getElementById('select-all').checked;
+    const ch = document.getElementById('select-all').checked;
     selectedIds.clear();
-    if (checked) filteredTasks.forEach(t => selectedIds.add(t.id));
-    updateSelectionCount();
+    if (ch) filteredTasks.forEach(t => selectedIds.add(t.id));
+    updateSelectionUI();
     renderTable();
 }
 
-function updateSelectionCount() {
-    document.getElementById('selection-count').textContent = `${selectedIds.size} ausgewählt`;
+function updateSelectionUI() {
+    const n = selectedIds.size;
+    document.getElementById('selection-count').textContent = n > 0 ? `${n} ausgewählt` : '';
+    document.getElementById('bulk-actions').style.display = n > 0 ? '' : 'none';
+    document.getElementById('select-all').checked = filteredTasks.length > 0 && n === filteredTasks.length;
 }
 
 // ── Bulk Actions ──
-function setActionButtonsDisabled(disabled) {
-    document.querySelectorAll('.action-buttons button').forEach(b => b.disabled = disabled);
-}
+function setActionsDisabled(d) { document.querySelectorAll('.bulk-actions button').forEach(b => b.disabled = d); }
 
 async function reopenSelected() {
-    if (selectedIds.size === 0) { showToast('Bitte Aufgaben auswählen.', 'error'); return; }
-    const projectId = document.getElementById('project-select').value;
-    const ids = [...selectedIds];
-    setActionButtonsDisabled(true);
-
+    if (!selectedIds.size) return;
+    const pid = document.getElementById('project-select').value;
+    setActionsDisabled(true);
     const { completed, failed } = await parallelLimit(
-        ids.map(id => () => api('POST', `/tasks/${id}/reopen`)), 5,
-        (done, total) => showProgress(done, total, 'Als unerledigt markieren')
-    );
-
-    hideProgress();
-    setActionButtonsDisabled(false);
-    showToast(failed > 0
-        ? `${completed} zurückgesetzt, ${failed} fehlgeschlagen.`
-        : `${completed} Aufgabe${completed !== 1 ? 'n' : ''} als unerledigt markiert.`,
-        failed > 0 ? 'error' : 'success');
-
-    selectedIds.clear();
-    invalidateCache(projectId);
-    await loadTasks(true);
+        [...selectedIds].map(id => () => api('POST', `/tasks/${id}/reopen`)), 5,
+        (d, t) => showProgress(d, t, 'Unerledigt'));
+    hideProgress(); setActionsDisabled(false);
+    showToast(failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als unerledigt markiert.`, failed ? 'error' : 'success');
+    selectedIds.clear(); invalidateCache(pid); await loadTasks(true);
 }
 
 async function completeSelected() {
-    if (selectedIds.size === 0) { showToast('Bitte Aufgaben auswählen.', 'error'); return; }
-    const projectId = document.getElementById('project-select').value;
-    const ids = [...selectedIds];
-    setActionButtonsDisabled(true);
-
+    if (!selectedIds.size) return;
+    const pid = document.getElementById('project-select').value;
+    setActionsDisabled(true);
     const { completed, failed } = await parallelLimit(
-        ids.map(id => () => api('POST', `/tasks/${id}/close`)), 5,
-        (done, total) => showProgress(done, total, 'Als erledigt markieren')
-    );
-
-    hideProgress();
-    setActionButtonsDisabled(false);
-    showToast(failed > 0
-        ? `${completed} erledigt, ${failed} fehlgeschlagen.`
-        : `${completed} Aufgabe${completed !== 1 ? 'n' : ''} als erledigt markiert.`,
-        failed > 0 ? 'error' : 'success');
-
-    selectedIds.clear();
-    invalidateCache(projectId);
-    await loadTasks(true);
+        [...selectedIds].map(id => () => api('POST', `/tasks/${id}/close`)), 5,
+        (d, t) => showProgress(d, t, 'Erledigt'));
+    hideProgress(); setActionsDisabled(false);
+    showToast(failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als erledigt markiert.`, failed ? 'error' : 'success');
+    selectedIds.clear(); invalidateCache(pid); await loadTasks(true);
 }
 
-// ── Helpers ──
-function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
-function formatDate(dateStr) {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-function showToast(msg, type = '') {
-    const toast = document.getElementById('toast');
-    toast.textContent = msg;
-    toast.className = 'toast';
-    if (type) toast.classList.add(`toast-${type}`);
-    toast.classList.remove('hidden');
-    clearTimeout(toast._timeout);
-    toast._timeout = setTimeout(() => toast.classList.add('hidden'), 3500);
+// ── Toast ──
+function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'toast' + (type ? ' toast-' + type : '');
+    t.classList.remove('hidden');
+    clearTimeout(t._t); t._t = setTimeout(() => t.classList.add('hidden'), 3000);
 }
 
 // ── Init ──
-document.getElementById('token-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') connect();
-});
+document.getElementById('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+bindToggleButtons();
 
 (function () {
-    const cached = localStorage.getItem('todoist_token');
-    if (cached) {
-        document.getElementById('token-input').value = cached;
-        connect();
-    }
+    const t = localStorage.getItem('todoist_token');
+    if (t) { document.getElementById('token-input').value = t; connect(); }
 })();
