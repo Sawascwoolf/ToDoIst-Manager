@@ -43,7 +43,25 @@ async function connect() {
     }
 
     try {
-        const projects = await api('GET', '/projects');
+        const res = await fetch(`${API_BASE}/projects`, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            if (res.status === 401 || res.status === 403) {
+                errEl.textContent = `Authentifizierung fehlgeschlagen (HTTP ${res.status}). Der Token ist ungültig oder abgelaufen.`;
+            } else if (res.status === 0) {
+                errEl.textContent = 'Netzwerkfehler: Die Anfrage wurde blockiert (CORS oder keine Internetverbindung).';
+            } else {
+                errEl.textContent = `API-Fehler HTTP ${res.status}: ${body.substring(0, 200)}`;
+            }
+            errEl.classList.remove('hidden');
+            return;
+        }
+
+        const projects = await res.json();
         const select = document.getElementById('project-select');
         select.innerHTML = '<option value="">-- Projekt wählen --</option>';
         projects.forEach(p => {
@@ -55,8 +73,13 @@ async function connect() {
         document.getElementById('project-section').classList.remove('hidden');
         showToast('Verbunden! Bitte Projekt auswählen.', 'success');
     } catch (e) {
-        errEl.textContent = 'Verbindung fehlgeschlagen. Ist der Token korrekt?';
+        if (e instanceof TypeError) {
+            errEl.textContent = 'Netzwerkfehler: Keine Verbindung zu api.todoist.com möglich. Prüfe deine Internetverbindung oder ob ein Adblocker/Firewall die Anfrage blockiert.';
+        } else {
+            errEl.textContent = `Unerwarteter Fehler: ${e.message}`;
+        }
         errEl.classList.remove('hidden');
+        console.error('Todoist connect error:', e);
     }
 }
 
