@@ -1,5 +1,4 @@
-const API_BASE = 'https://api.todoist.com/rest/v2';
-const SYNC_BASE = 'https://api.todoist.com/sync/v9';
+const API_BASE = 'https://api.todoist.com/api/v1';
 
 let token = '';
 let allTasks = [];
@@ -11,7 +10,7 @@ let sortAsc = true;
 
 // ── API Helpers ──
 
-async function api(method, path, body = null, base = API_BASE) {
+async function api(method, path, body = null) {
     const headers = {
         'Authorization': `Bearer ${token}`,
     };
@@ -20,13 +19,36 @@ async function api(method, path, body = null, base = API_BASE) {
     }
     const opts = { method, headers };
     if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(`${base}${path}`, opts);
+    const res = await fetch(`${API_BASE}${path}`, opts);
     if (!res.ok) {
         const text = await res.text();
         throw new Error(`API ${res.status}: ${text}`);
     }
     if (res.status === 204) return null;
     return res.json();
+}
+
+// Fetch all pages for paginated endpoints (returns flat array)
+async function apiPaginated(path) {
+    let allResults = [];
+    let cursor = null;
+    const separator = path.includes('?') ? '&' : '?';
+
+    do {
+        const url = cursor ? `${path}${separator}cursor=${cursor}` : path;
+        const data = await api('GET', url);
+
+        if (Array.isArray(data)) {
+            // Fallback if API returns bare array
+            allResults = allResults.concat(data);
+            break;
+        }
+
+        allResults = allResults.concat(data.results || []);
+        cursor = data.nextCursor || null;
+    } while (cursor);
+
+    return allResults;
 }
 
 // ── Connect ──
@@ -52,8 +74,8 @@ async function connect() {
             const body = await res.text().catch(() => '');
             if (res.status === 401 || res.status === 403) {
                 errEl.textContent = `Authentifizierung fehlgeschlagen (HTTP ${res.status}). Der Token ist ungültig oder abgelaufen.`;
-            } else if (res.status === 0) {
-                errEl.textContent = 'Netzwerkfehler: Die Anfrage wurde blockiert (CORS oder keine Internetverbindung).';
+            } else if (res.status === 410) {
+                errEl.textContent = `API-Endpunkt nicht mehr verfügbar (HTTP 410). Die API-Version wurde möglicherweise geändert.`;
             } else {
                 errEl.textContent = `API-Fehler HTTP ${res.status}: ${body.substring(0, 200)}`;
             }
@@ -61,7 +83,9 @@ async function connect() {
             return;
         }
 
-        const projects = await res.json();
+        const data = await res.json();
+        const projects = data.results || data;
+
         const select = document.getElementById('project-select');
         select.innerHTML = '<option value="">-- Projekt wählen --</option>';
         projects.forEach(p => {
@@ -107,11 +131,11 @@ async function loadTasks() {
         if (isCompleted) {
             tasks = await loadCompletedTasks(projectId);
         } else {
-            tasks = await api('GET', `/tasks?project_id=${projectId}`);
+            tasks = await apiPaginated(`/tasks?project_id=${projectId}`);
         }
 
         // Load sections for this project
-        const sectionList = await api('GET', `/sections?project_id=${projectId}`);
+        const sectionList = await apiPaginated(`/sections?project_id=${projectId}`);
         sections = {};
         sectionList.forEach(s => { sections[s.id] = s.name; });
 
@@ -127,19 +151,16 @@ async function loadTasks() {
 
 async function loadCompletedTasks(projectId) {
     try {
-        const res = await fetch(`${SYNC_BASE}/completed/get_all?project_id=${projectId}&limit=200`, {
-            headers: { 'Authorization': `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error(`Sync API ${res.status}`);
-        const data = await res.json();
-        return (data.items || []).map(item => ({
-            id: item.task_id,
+        const data = await api('GET', `/tasks/completed?project_id=${projectId}&limit=200`);
+        const items = data.items || data.results || [];
+        return items.map(item => ({
+            id: item.taskId || item.task_id || item.id,
             content: item.content,
             description: '',
             priority: 1,
             labels: [],
             due: null,
-            section_id: item.section_id || null,
+            sectionId: item.sectionId || item.section_id || null,
             is_completed: true,
         }));
     } catch (e) {
@@ -217,9 +238,8 @@ function sortBy(field) {
     document.querySelectorAll('th.sortable').forEach(th => {
         th.classList.remove('sort-asc', 'sort-desc');
     });
-    const headers = { content: 0, priority: 1, due: 2, section: 3 };
     const sortableThs = document.querySelectorAll('th.sortable');
-    const idx = Object.keys(headers).indexOf(field);
+    const idx = ['content', 'priority', 'due', 'section'].indexOf(field);
     if (idx >= 0 && sortableThs[idx]) {
         sortableThs[idx].classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
     }
@@ -245,8 +265,8 @@ function sortTasks() {
                 vb = b.due ? b.due.date : 'z';
                 break;
             case 'section':
-                va = sections[a.section_id] || '';
-                vb = sections[b.section_id] || '';
+                va = sections[a.sectionId] || sections[a.section_id] || '';
+                vb = sections[b.sectionId] || sections[b.section_id] || '';
                 break;
             default:
                 va = '';
@@ -261,6 +281,10 @@ function sortTasks() {
 // ── Rendering ──
 
 const PRIORITY_LABELS = { 4: 'P1', 3: 'P2', 2: 'P3', 1: 'P4' };
+
+function getSectionName(task) {
+    return sections[task.sectionId] || sections[task.section_id] || '';
+}
 
 function renderTable() {
     const tbody = document.getElementById('task-body');
@@ -298,7 +322,7 @@ function renderTable() {
         }
 
         const labels = (t.labels || []).map(l => `<span class="label-tag">${escapeHtml(l)}</span>`).join('');
-        const sectionName = sections[t.section_id] ? escapeHtml(sections[t.section_id]) : '—';
+        const sectionName = getSectionName(t);
 
         return `<tr class="${selectedClass}" data-id="${t.id}">
             <td class="col-check"><input type="checkbox" ${checked} onchange="toggleSelect('${t.id}')"></td>
@@ -306,7 +330,7 @@ function renderTable() {
             <td>${priorityBadge}</td>
             <td>${dueHtml}</td>
             <td>${labels || '—'}</td>
-            <td>${sectionName}</td>
+            <td>${sectionName ? escapeHtml(sectionName) : '—'}</td>
         </tr>`;
     }).join('');
 
@@ -322,10 +346,8 @@ function toggleSelect(id) {
         selectedIds.add(id);
     }
     updateSelectionCount();
-    // Update row highlight
     const row = document.querySelector(`tr[data-id="${id}"]`);
     if (row) row.classList.toggle('selected', selectedIds.has(id));
-    // Update select-all checkbox
     document.getElementById('select-all').checked =
         filteredTasks.length > 0 && selectedIds.size === filteredTasks.length;
 }
