@@ -8,6 +8,25 @@ let selectedIds = new Set();
 let sortField = 'content';
 let sortAsc = true;
 
+// ── Task Cache ──
+// Cache per project: { projectId: { open: [...], completed: [...], sections: {...}, ts: Date } }
+const taskCache = {};
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCached(projectId, statusFilter) {
+    const entry = taskCache[projectId];
+    if (!entry) return null;
+    if (Date.now() - entry.ts > CACHE_TTL) return null;
+    if (statusFilter === 'open' && entry.open) return entry;
+    if (statusFilter === 'completed' && entry.completed) return entry;
+    if (statusFilter === 'all' && entry.open && entry.completed) return entry;
+    return null;
+}
+
+function invalidateCache(projectId) {
+    delete taskCache[projectId];
+}
+
 // ── API Helpers ──
 
 async function api(method, path, body = null) {
@@ -28,14 +47,18 @@ async function api(method, path, body = null) {
     return res.json();
 }
 
-// Fetch all pages for paginated endpoints (returns flat array)
+// Fetch all pages for paginated cursor-based endpoints
 async function apiPaginated(path) {
     let allResults = [];
     let cursor = null;
     const separator = path.includes('?') ? '&' : '?';
 
     do {
-        const url = cursor ? `${path}${separator}cursor=${cursor}` : path;
+        let url = cursor ? `${path}${separator}cursor=${cursor}` : path;
+        // Request maximum page size if not already specified
+        if (!url.includes('limit=')) {
+            url += (url.includes('?') ? '&' : '?') + 'limit=200';
+        }
         const data = await api('GET', url);
 
         if (Array.isArray(data)) {
@@ -48,6 +71,34 @@ async function apiPaginated(path) {
     } while (cursor);
 
     return allResults;
+}
+
+// Fetch all completed tasks with offset-based pagination
+async function fetchAllCompletedTasks(projectId) {
+    let allItems = [];
+    let offset = 0;
+    const pageSize = 200;
+
+    do {
+        const data = await api('GET', `/tasks/completed?project_id=${projectId}&limit=${pageSize}&offset=${offset}`);
+        const items = data.items || data.results || [];
+        allItems = allItems.concat(items);
+        // If we got fewer than pageSize, we've reached the end
+        if (items.length < pageSize) break;
+        offset += items.length;
+    } while (true);
+
+    return allItems.map(item => ({
+        id: item.taskId || item.task_id || item.id,
+        content: item.content,
+        description: '',
+        priority: 1,
+        labels: [],
+        due: null,
+        sectionId: item.sectionId || item.section_id || null,
+        parentId: item.parentId || item.parent_id || null,
+        _status: 'completed',
+    }));
 }
 
 // Run promises in parallel with concurrency limit
@@ -153,13 +204,33 @@ async function connect() {
 
 // ── Load Tasks ──
 
-async function loadTasks() {
+async function loadTasks(forceRefresh = false) {
     const projectId = document.getElementById('project-select').value;
     if (!projectId) return;
 
     const filterSection = document.getElementById('filter-section');
     const taskSection = document.getElementById('task-section');
     const loading = document.getElementById('loading');
+    const statusFilter = document.getElementById('filter-status').value;
+
+    // Check cache first
+    if (!forceRefresh) {
+        const cached = getCached(projectId, statusFilter);
+        if (cached) {
+            sections = cached.sections;
+            let tasks = [];
+            if (statusFilter === 'open') tasks = cached.open;
+            else if (statusFilter === 'completed') tasks = cached.completed;
+            else tasks = [...(cached.open || []), ...(cached.completed || [])];
+            allTasks = tasks;
+            filterSection.classList.remove('hidden');
+            taskSection.classList.remove('hidden');
+            populateLabelFilter(allTasks);
+            applyFilters();
+            showToast(`${allTasks.length} Aufgaben (aus Cache).`, 'success');
+            return;
+        }
+    }
 
     filterSection.classList.remove('hidden');
     taskSection.classList.remove('hidden');
@@ -168,61 +239,39 @@ async function loadTasks() {
     document.getElementById('no-tasks').classList.add('hidden');
 
     try {
-        const statusFilter = document.getElementById('filter-status').value;
+        // Always load both open + completed so we can cache everything
+        const [openTasks, completedTasks, sectionList] = await Promise.all([
+            apiPaginated(`/tasks?project_id=${projectId}`),
+            fetchAllCompletedTasks(projectId),
+            apiPaginated(`/sections?project_id=${projectId}`),
+        ]);
 
-        // Load sections in parallel with tasks
-        const sectionsPromise = apiPaginated(`/sections?project_id=${projectId}`);
-
-        let openTasks = [];
-        let completedTasks = [];
-
-        if (statusFilter === 'completed') {
-            completedTasks = await loadCompletedTasks(projectId);
-        } else if (statusFilter === 'all') {
-            [openTasks, completedTasks] = await Promise.all([
-                apiPaginated(`/tasks?project_id=${projectId}`),
-                loadCompletedTasks(projectId),
-            ]);
-        } else {
-            openTasks = await apiPaginated(`/tasks?project_id=${projectId}`);
-        }
-
-        // Mark open tasks explicitly
         openTasks.forEach(t => { t._status = 'open'; });
-        completedTasks.forEach(t => { t._status = 'completed'; });
 
-        const sectionList = await sectionsPromise;
-        sections = {};
-        sectionList.forEach(s => { sections[s.id] = s.name; });
+        const secs = {};
+        sectionList.forEach(s => { secs[s.id] = s.name; });
+        sections = secs;
 
-        allTasks = [...openTasks, ...completedTasks];
+        // Store in cache
+        taskCache[projectId] = {
+            open: openTasks,
+            completed: completedTasks,
+            sections: secs,
+            ts: Date.now(),
+        };
+
+        // Apply status filter from cached data
+        if (statusFilter === 'open') allTasks = openTasks;
+        else if (statusFilter === 'completed') allTasks = completedTasks;
+        else allTasks = [...openTasks, ...completedTasks];
+
         populateLabelFilter(allTasks);
         applyFilters();
+        showToast(`${openTasks.length} offene + ${completedTasks.length} erledigte Aufgaben geladen.`, 'success');
     } catch (e) {
         showToast('Fehler beim Laden: ' + e.message, 'error');
     } finally {
         loading.classList.add('hidden');
-    }
-}
-
-async function loadCompletedTasks(projectId) {
-    try {
-        const data = await api('GET', `/tasks/completed?project_id=${projectId}&limit=200`);
-        const items = data.items || data.results || [];
-        return items.map(item => ({
-            id: item.taskId || item.task_id || item.id,
-            content: item.content,
-            description: '',
-            priority: 1,
-            labels: [],
-            due: null,
-            sectionId: item.sectionId || item.section_id || null,
-            parentId: item.parentId || item.parent_id || null,
-            _status: 'completed',
-        }));
-    } catch (e) {
-        showToast('Fehler beim Laden erledigter Aufgaben: ' + e.message, 'error');
-        return [];
     }
 }
 
@@ -232,12 +281,10 @@ function buildHierarchy(tasks) {
     const taskMap = new Map();
     tasks.forEach(t => taskMap.set(t.id, t));
 
-    // Calculate depth for each task
     tasks.forEach(t => {
         let depth = 0;
         let current = t;
-        const parentKey = current.parentId || current.parent_id;
-        let pid = parentKey;
+        let pid = current.parentId || current.parent_id;
         while (pid && taskMap.has(pid)) {
             depth++;
             current = taskMap.get(pid);
@@ -246,11 +293,9 @@ function buildHierarchy(tasks) {
         t._depth = depth;
     });
 
-    // Sort: parents first, then children in order, preserving existing sort
     const roots = tasks.filter(t => t._depth === 0);
     const children = tasks.filter(t => t._depth > 0);
 
-    // Group children by parent
     const childrenByParent = new Map();
     children.forEach(c => {
         const pid = c.parentId || c.parent_id;
@@ -258,7 +303,6 @@ function buildHierarchy(tasks) {
         childrenByParent.get(pid).push(c);
     });
 
-    // Flatten tree in order
     const result = [];
     function addWithChildren(task) {
         result.push(task);
@@ -267,10 +311,9 @@ function buildHierarchy(tasks) {
     }
     roots.forEach(r => addWithChildren(r));
 
-    // Add orphaned children (parent not in current list)
     children.forEach(c => {
         if (!result.includes(c)) {
-            c._depth = 0; // treat as root if parent not visible
+            c._depth = 0;
             result.push(c);
         }
     });
@@ -300,6 +343,16 @@ function applyFilters() {
     const priority = document.getElementById('filter-priority').value;
     const label = document.getElementById('filter-label').value;
     const due = document.getElementById('filter-due').value;
+    const statusFilter = document.getElementById('filter-status').value;
+
+    // Re-slice from cache if status changed
+    const projectId = document.getElementById('project-select').value;
+    const cached = projectId ? taskCache[projectId] : null;
+    if (cached) {
+        if (statusFilter === 'open') allTasks = cached.open || [];
+        else if (statusFilter === 'completed') allTasks = cached.completed || [];
+        else allTasks = [...(cached.open || []), ...(cached.completed || [])];
+    }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -498,8 +551,8 @@ async function reopenSelected() {
         return;
     }
 
+    const projectId = document.getElementById('project-select').value;
     const ids = [...selectedIds];
-    const total = ids.length;
     setActionButtonsDisabled(true);
 
     const tasks = ids.map(id => () => api('POST', `/tasks/${id}/reopen`));
@@ -518,7 +571,8 @@ async function reopenSelected() {
     }
 
     selectedIds.clear();
-    await loadTasks();
+    invalidateCache(projectId);
+    await loadTasks(true);
 }
 
 async function completeSelected() {
@@ -527,8 +581,8 @@ async function completeSelected() {
         return;
     }
 
+    const projectId = document.getElementById('project-select').value;
     const ids = [...selectedIds];
-    const total = ids.length;
     setActionButtonsDisabled(true);
 
     const tasks = ids.map(id => () => api('POST', `/tasks/${id}/close`));
@@ -547,7 +601,8 @@ async function completeSelected() {
     }
 
     selectedIds.clear();
-    await loadTasks();
+    invalidateCache(projectId);
+    await loadTasks(true);
 }
 
 // ── Helpers ──
@@ -573,10 +628,17 @@ function showToast(msg, type = '') {
     toast._timeout = setTimeout(() => toast.classList.add('hidden'), 3500);
 }
 
-// Re-load tasks when status filter changes
+// Status filter: switch from cache without re-fetching
 document.getElementById('filter-status').addEventListener('change', () => {
     const projectId = document.getElementById('project-select').value;
-    if (projectId) loadTasks();
+    if (!projectId) return;
+    // If we have cache, just re-apply filters (no API call)
+    const cached = taskCache[projectId];
+    if (cached) {
+        applyFilters();
+    } else {
+        loadTasks();
+    }
 });
 
 // Allow connecting with Enter key
