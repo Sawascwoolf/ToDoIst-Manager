@@ -113,6 +113,7 @@
                             <th class="col-status">Status</th>
                             <th class="col-priority sortable" onclick="sortBy('priority')">Priorit&auml;t <span class="sort-icon"></span></th>
                             <th class="col-due sortable" onclick="sortBy('due')">F&auml;lligkeit <span class="sort-icon"></span></th>
+                            <th class="col-assignee sortable" onclick="sortBy('assignee')">Verantwortlich <span class="sort-icon"></span></th>
                             <th class="col-labels">Labels</th>
                             <th class="col-section sortable" onclick="sortBy('section')">Abschnitt <span class="sort-icon"></span></th>
                         </tr>
@@ -127,7 +128,8 @@
         <!-- Status Toast -->
         <div id="toast" class="toast hidden"></div>
 
-        <footer class="version-footer">Build #8</footer>
+        <footer class="version-footer">Build #9</footer>
+<!-- query params: projectId (camelCase for API v1) -->
     </div>
 
     <script src="app.js"></script>

@@ -325,6 +325,10 @@ tbody td {
     width: 120px;
 }
 
+.col-assignee {
+    width: 130px;
+}
+
 .col-labels {
     width: 160px;
 }

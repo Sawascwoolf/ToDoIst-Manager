@@ -4,6 +4,7 @@ let token = '';
 let allTasks = [];
 let filteredTasks = [];
 let sections = {};
+let collaborators = {}; // userId -> name
 let selectedIds = new Set();
 let sortField = 'content';
 let sortAsc = true;
@@ -80,7 +81,7 @@ async function fetchAllCompletedTasks(projectId) {
     const pageSize = 200;
 
     do {
-        const data = await api('GET', `/tasks/completed?project_id=${projectId}&limit=${pageSize}&offset=${offset}`);
+        const data = await api('GET', `/tasks/completed?projectId=${projectId}&limit=${pageSize}&offset=${offset}`);
         const items = data.items || data.results || [];
         allItems = allItems.concat(items);
         // If we got fewer than pageSize, we've reached the end
@@ -218,6 +219,7 @@ async function loadTasks(forceRefresh = false) {
         const cached = getCached(projectId, statusFilter);
         if (cached) {
             sections = cached.sections;
+            collaborators = cached.collaborators || {};
             let tasks = [];
             if (statusFilter === 'open') tasks = cached.open;
             else if (statusFilter === 'completed') tasks = cached.completed;
@@ -240,10 +242,11 @@ async function loadTasks(forceRefresh = false) {
 
     try {
         // Always load both open + completed so we can cache everything
-        const [openTasks, completedTasks, sectionList] = await Promise.all([
-            apiPaginated(`/tasks?project_id=${projectId}`),
+        const [openTasks, completedTasks, sectionList, collabList] = await Promise.all([
+            apiPaginated(`/tasks?projectId=${projectId}`),
             fetchAllCompletedTasks(projectId),
-            apiPaginated(`/sections?project_id=${projectId}`),
+            apiPaginated(`/sections?projectId=${projectId}`),
+            apiPaginated(`/projects/${projectId}/collaborators`).catch(() => []),
         ]);
 
         openTasks.forEach(t => { t._status = 'open'; });
@@ -252,11 +255,16 @@ async function loadTasks(forceRefresh = false) {
         sectionList.forEach(s => { secs[s.id] = s.name; });
         sections = secs;
 
+        const collabs = {};
+        collabList.forEach(c => { collabs[c.id] = c.name || c.email || c.id; });
+        collaborators = collabs;
+
         // Store in cache
         taskCache[projectId] = {
             open: openTasks,
             completed: completedTasks,
             sections: secs,
+            collaborators: collabs,
             ts: Date.now(),
         };
 
@@ -401,7 +409,7 @@ function sortBy(field) {
         th.classList.remove('sort-asc', 'sort-desc');
     });
     const sortableThs = document.querySelectorAll('th.sortable');
-    const idx = ['content', 'priority', 'due', 'section'].indexOf(field);
+    const idx = ['content', 'priority', 'due', 'assignee', 'section'].indexOf(field);
     if (idx >= 0 && sortableThs[idx]) {
         sortableThs[idx].classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
     }
@@ -427,6 +435,10 @@ function sortTasks() {
                 va = a.due ? a.due.date : 'z';
                 vb = b.due ? b.due.date : 'z';
                 break;
+            case 'assignee':
+                va = getAssigneeName(a).toLowerCase();
+                vb = getAssigneeName(b).toLowerCase();
+                break;
             case 'section':
                 va = sections[a.sectionId] || sections[a.section_id] || '';
                 vb = sections[b.sectionId] || sections[b.section_id] || '';
@@ -447,6 +459,12 @@ const PRIORITY_LABELS = { 4: 'P1', 3: 'P2', 2: 'P3', 1: 'P4' };
 
 function getSectionName(task) {
     return sections[task.sectionId] || sections[task.section_id] || '';
+}
+
+function getAssigneeName(task) {
+    const uid = task.responsibleUid || task.assigneeId || task.assignee_id;
+    if (!uid) return '';
+    return collaborators[uid] || uid;
 }
 
 function renderTable() {
@@ -490,6 +508,7 @@ function renderTable() {
 
         const labels = (t.labels || []).map(l => `<span class="label-tag">${escapeHtml(l)}</span>`).join('');
         const sectionName = getSectionName(t);
+        const assignee = getAssigneeName(t);
 
         const isCompleted = t._status === 'completed' || t.is_completed || t.checked;
         const statusBadge = isCompleted
@@ -502,6 +521,7 @@ function renderTable() {
             <td>${statusBadge}</td>
             <td>${priorityBadge}</td>
             <td>${dueHtml}</td>
+            <td>${assignee ? escapeHtml(assignee) : '—'}</td>
             <td>${labels || '—'}</td>
             <td>${sectionName ? escapeHtml(sectionName) : '—'}</td>
         </tr>`;
