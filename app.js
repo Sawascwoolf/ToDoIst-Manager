@@ -582,6 +582,25 @@ function showCtxMenu(e, taskId) {
         labelsWrap.style.display = 'none';
     }
 
+    // Populate add-label submenu (all project labels not yet on this task)
+    const addLabelWrap = document.getElementById('ctx-addlabel-wrap');
+    const addLabelSub = document.getElementById('ctx-addlabel-sub');
+    if (addLabelWrap && addLabelSub) {
+        const allLabels = new Set();
+        allTasks.forEach(t => (t.labels || []).forEach(l => allLabels.add(l)));
+        const taskLabels = new Set(task && task.labels ? task.labels : []);
+        const available = [...allLabels].filter(l => !taskLabels.has(l)).sort();
+        if (available.length > 0) {
+            addLabelWrap.style.display = '';
+            addLabelSub.innerHTML = '';
+            available.forEach(l => {
+                addLabelSub.innerHTML += `<button onclick="ctxAction('addLabel','${esc(l)}')">${esc(l)}</button>`;
+            });
+        } else {
+            addLabelWrap.style.display = 'none';
+        }
+    }
+
     menu.classList.remove('hidden');
     const rect = e.currentTarget.getBoundingClientRect();
     const menuH = menu.offsetHeight || 380;
@@ -651,6 +670,19 @@ async function ctxAction(action, value) {
             task.labels = newLabels;
             invalidateCache(currentProjectId);
             showToast(`Label "${value}" entfernt.`, 'success', async () => {
+                await api('POST', `/tasks/${id}`, { labels: oldLabels });
+                task.labels = oldLabels;
+                invalidateCache(currentProjectId);
+                applyFilters();
+            });
+        } else if (action === 'addLabel') {
+            if (!task) return;
+            const oldLabels = [...(task.labels || [])];
+            const newLabels = [...oldLabels, value];
+            await api('POST', `/tasks/${id}`, { labels: newLabels });
+            task.labels = newLabels;
+            invalidateCache(currentProjectId);
+            showToast(`Label "${value}" hinzugefügt.`, 'success', async () => {
                 await api('POST', `/tasks/${id}`, { labels: oldLabels });
                 task.labels = oldLabels;
                 invalidateCache(currentProjectId);
