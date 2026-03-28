@@ -428,9 +428,8 @@ function updateStats() {
 function renderTable() {
     const tbody = document.getElementById('task-body');
     const noTasks = document.getElementById('no-tasks');
-    const secCtrl = document.getElementById('section-controls');
 
-    if (filteredTasks.length === 0) { tbody.innerHTML = ''; noTasks.classList.remove('hidden'); secCtrl.style.display = 'none'; return; }
+    if (filteredTasks.length === 0) { tbody.innerHTML = ''; noTasks.classList.remove('hidden'); return; }
     noTasks.classList.add('hidden');
 
     const groups = []; const gmap = new Map();
@@ -441,7 +440,6 @@ function renderTable() {
     });
 
     const hasSections = groups.length > 1 || groups[0]?.id !== '__none__';
-    secCtrl.style.display = hasSections ? '' : 'none';
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
     let html = '';
