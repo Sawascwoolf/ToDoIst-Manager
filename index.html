@@ -36,7 +36,7 @@
                 <option value="">Verbinde...</option>
             </select>
             <div id="stats-top" class="stats"></div>
-            <div class="build-badge">Build #17</div>
+            <div class="build-badge">Build #18</div>
         </div>
         <div id="main-error" class="main-error hidden"></div>
 
@@ -134,14 +134,22 @@
             <button onclick="ctxAction('complete')">Als erledigt markieren</button>
             <button onclick="ctxAction('reopen')">Als unerledigt markieren</button>
             <div class="ctx-separator"></div>
-            <div class="ctx-submenu-wrap">
+            <div class="ctx-submenu-wrap" id="ctx-priority-wrap">
                 <button class="ctx-has-sub">Priorit&auml;t &auml;ndern &#9656;</button>
-                <div class="ctx-submenu">
+                <div class="ctx-submenu" id="ctx-priority-sub">
                     <button onclick="ctxAction('priority',4)"><span class="priority-dot p1-dot"></span> P1</button>
                     <button onclick="ctxAction('priority',3)"><span class="priority-dot p2-dot"></span> P2</button>
                     <button onclick="ctxAction('priority',2)"><span class="priority-dot p3-dot"></span> P3</button>
                     <button onclick="ctxAction('priority',1)"><span class="priority-dot p4-dot"></span> P4</button>
                 </div>
+            </div>
+            <div class="ctx-submenu-wrap" id="ctx-assignee-wrap">
+                <button class="ctx-has-sub">Verantwortlichen &auml;ndern &#9656;</button>
+                <div class="ctx-submenu" id="ctx-assignee-sub"></div>
+            </div>
+            <div class="ctx-submenu-wrap" id="ctx-labels-wrap" style="display:none">
+                <button class="ctx-has-sub">Label entfernen &#9656;</button>
+                <div class="ctx-submenu" id="ctx-labels-sub"></div>
             </div>
             <button onclick="ctxAction('editDue')">F&auml;lligkeitsdatum &auml;ndern</button>
             <div class="ctx-separator"></div>

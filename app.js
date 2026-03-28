@@ -558,12 +558,41 @@ function showCtxMenu(e, taskId) {
     hideListMenu();
     const menu = document.getElementById('context-menu');
     if (!menu) return;
+
+    // Populate assignee submenu
+    const assigneeSub = document.getElementById('ctx-assignee-sub');
+    if (assigneeSub) {
+        assigneeSub.innerHTML = '<button onclick="ctxAction(\'assignee\',null)">Niemand</button>';
+        Object.entries(collaborators).forEach(([uid, name]) => {
+            assigneeSub.innerHTML += `<button onclick="ctxAction('assignee','${uid}')">${esc(name)}</button>`;
+        });
+    }
+
+    // Populate labels submenu for this task
+    const task = allTasks.find(t => t.id === taskId);
+    const labelsWrap = document.getElementById('ctx-labels-wrap');
+    const labelsSub = document.getElementById('ctx-labels-sub');
+    if (labelsWrap && labelsSub && task && task.labels && task.labels.length > 0) {
+        labelsWrap.style.display = '';
+        labelsSub.innerHTML = '';
+        task.labels.forEach(l => {
+            labelsSub.innerHTML += `<button onclick="ctxAction('removeLabel','${esc(l)}')">${esc(l)} &times;</button>`;
+        });
+    } else if (labelsWrap) {
+        labelsWrap.style.display = 'none';
+    }
+
     menu.classList.remove('hidden');
     const rect = e.currentTarget.getBoundingClientRect();
-    const menuH = 320;
+    const menuH = menu.offsetHeight || 380;
     const top = (rect.bottom + menuH > window.innerHeight) ? Math.max(4, rect.top - menuH) : rect.bottom + 4;
+    const left = Math.min(rect.left, window.innerWidth - 220);
     menu.style.top = top + 'px';
-    menu.style.left = Math.min(rect.left, window.innerWidth - 220) + 'px';
+    menu.style.left = left + 'px';
+
+    // Flip submenus to open left if they'd overflow the right edge
+    const openLeft = left + 220 + 140 > window.innerWidth;
+    menu.querySelectorAll('.ctx-submenu').forEach(s => s.classList.toggle('open-left', openLeft));
 }
 
 function hideCtxMenu() { const m = document.getElementById('context-menu'); if (m) m.classList.add('hidden'); ctxTaskId = null; }
@@ -601,6 +630,32 @@ async function ctxAction(action, value) {
                 invalidateCache(currentProjectId);
                 applyFilters();
             } : null);
+        } else if (action === 'assignee') {
+            const oldUid = task ? (task.responsible_uid || task.responsibleUid || task.assignee_id || task.assigneeId || null) : null;
+            const body = value ? { responsible_uid: value } : { responsible_uid: null };
+            await api('POST', `/tasks/${id}`, body);
+            if (task) { task.responsible_uid = value; task.responsibleUid = value; task.assignee_id = value; }
+            invalidateCache(currentProjectId);
+            const name = value ? (collaborators[value] || value) : 'Niemand';
+            showToast(`Verantwortlich: ${name}`, 'success', async () => {
+                await api('POST', `/tasks/${id}`, { responsible_uid: oldUid });
+                if (task) { task.responsible_uid = oldUid; task.responsibleUid = oldUid; task.assignee_id = oldUid; }
+                invalidateCache(currentProjectId);
+                applyFilters();
+            });
+        } else if (action === 'removeLabel') {
+            if (!task) return;
+            const oldLabels = [...(task.labels || [])];
+            const newLabels = oldLabels.filter(l => l !== value);
+            await api('POST', `/tasks/${id}`, { labels: newLabels });
+            task.labels = newLabels;
+            invalidateCache(currentProjectId);
+            showToast(`Label "${value}" entfernt.`, 'success', async () => {
+                await api('POST', `/tasks/${id}`, { labels: oldLabels });
+                task.labels = oldLabels;
+                invalidateCache(currentProjectId);
+                applyFilters();
+            });
         } else if (action === 'editDue') {
             const input = document.getElementById('due-date-input');
             input.value = task && task.due ? task.due.date : '';
