@@ -772,15 +772,18 @@ async function completeSelected() {
 let undoFn = null;
 function showToast(msg, type, undoCallback) {
     const t = document.getElementById('toast');
+    if (!t) return;
     const msgEl = document.getElementById('toast-msg');
     const undoBtn = document.getElementById('toast-undo');
-    msgEl.textContent = msg;
+    if (!msgEl) { t.textContent = msg; } else { msgEl.textContent = msg; }
     t.className = 'toast' + (type ? ' toast-' + type : '');
     t.classList.remove('hidden');
     undoFn = undoCallback || null;
-    if (undoCallback) { undoBtn.classList.remove('hidden'); } else { undoBtn.classList.add('hidden'); }
+    if (undoBtn) {
+        if (undoCallback) { undoBtn.classList.remove('hidden'); } else { undoBtn.classList.add('hidden'); }
+    }
     clearTimeout(t._t);
-    t._t = setTimeout(() => { t.classList.add('hidden'); undoFn = null; }, undoCallback ? 6000 : 3000);
+    t._t = setTimeout(() => { t.classList.add('hidden'); undoFn = null; }, undoCallback ? 8000 : 4000);
 }
 async function executeUndo() {
     if (!undoFn) return;
