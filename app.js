@@ -582,7 +582,7 @@ function showCtxMenu(e, taskId) {
         labelsWrap.style.display = 'none';
     }
 
-    // Populate add-label submenu (all project labels not yet on this task)
+    // Populate add-label submenu (all project labels not yet on this task + free input)
     const addLabelWrap = document.getElementById('ctx-addlabel-wrap');
     const addLabelSub = document.getElementById('ctx-addlabel-sub');
     if (addLabelWrap && addLabelSub) {
@@ -590,15 +590,13 @@ function showCtxMenu(e, taskId) {
         allTasks.forEach(t => (t.labels || []).forEach(l => allLabels.add(l)));
         const taskLabels = new Set(task && task.labels ? task.labels : []);
         const available = [...allLabels].filter(l => !taskLabels.has(l)).sort();
-        if (available.length > 0) {
-            addLabelWrap.style.display = '';
-            addLabelSub.innerHTML = '';
-            available.forEach(l => {
-                addLabelSub.innerHTML += `<button onclick="ctxAction('addLabel','${esc(l)}')">${esc(l)}</button>`;
-            });
-        } else {
-            addLabelWrap.style.display = 'none';
-        }
+        addLabelWrap.style.display = '';
+        addLabelSub.innerHTML = '';
+        available.forEach(l => {
+            addLabelSub.innerHTML += `<button onclick="ctxAction('addLabel','${esc(l)}')">${esc(l)}</button>`;
+        });
+        if (available.length > 0) addLabelSub.innerHTML += '<div class="ctx-separator"></div>';
+        addLabelSub.innerHTML += `<div class="ctx-input-row"><input type="text" id="ctx-new-label" placeholder="Neues Label..." onkeydown="if(event.key==='Enter'){ctxAction('addLabel',this.value);event.stopPropagation()}"><button onclick="ctxAction('addLabel',document.getElementById('ctx-new-label').value)">+</button></div>`;
     }
 
     menu.classList.remove('hidden');
@@ -676,8 +674,10 @@ async function ctxAction(action, value) {
                 applyFilters();
             });
         } else if (action === 'addLabel') {
-            if (!task) return;
+            if (!task || !value || !value.trim()) return;
+            value = value.trim();
             const oldLabels = [...(task.labels || [])];
+            if (oldLabels.includes(value)) { showToast(`Label "${value}" bereits vorhanden.`, 'error'); return; }
             const newLabels = [...oldLabels, value];
             await api('POST', `/tasks/${id}`, { labels: newLabels });
             task.labels = newLabels;
