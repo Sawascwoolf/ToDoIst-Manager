@@ -7,114 +7,129 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Todoist Manager</h1>
-        </header>
-
-        <!-- Token Input -->
-        <section id="auth-section" class="card">
-            <h2>API-Token eingeben</h2>
-            <p class="hint">Du findest deinen Token unter <strong>Todoist &rarr; Einstellungen &rarr; Integrationen &rarr; Entwickler</strong>.</p>
-            <div class="token-row">
-                <input type="password" id="token-input" placeholder="Todoist API-Token">
-                <button id="connect-btn" onclick="connect()">Verbinden</button>
+    <!-- Sidebar (Token only) -->
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <h2>Einstellungen</h2>
+            <button class="sidebar-close" onclick="toggleSidebar()">&times;</button>
+        </div>
+        <div class="sidebar-content">
+            <div class="sidebar-section">
+                <label>API-Token</label>
+                <p class="hint">Todoist &rarr; Einstellungen &rarr; Integrationen &rarr; Entwickler</p>
+                <div class="token-row">
+                    <input type="password" id="token-input" placeholder="API-Token">
+                    <button id="connect-btn" onclick="connect()">OK</button>
+                </div>
+                <p id="auth-error" class="error hidden"></p>
             </div>
-            <p id="auth-error" class="error hidden"></p>
-        </section>
+        </div>
+        <div class="sidebar-footer">Build #13</div>
+    </aside>
+    <div id="sidebar-overlay" class="sidebar-overlay hidden" onclick="toggleSidebar()"></div>
 
-        <!-- Project Selection -->
-        <section id="project-section" class="card hidden">
-            <h2>Projekt ausw&auml;hlen</h2>
-            <select id="project-select" onchange="loadTasks()">
-                <option value="">-- Projekt w&auml;hlen --</option>
+    <!-- Main Content -->
+    <div class="main">
+        <div class="topbar">
+            <button class="hamburger" onclick="toggleSidebar()" title="Einstellungen">&#9776;</button>
+            <select id="project-select" class="topbar-select" onchange="loadTasks()" disabled>
+                <option value="">Verbinde...</option>
             </select>
-        </section>
+            <div id="stats-top" class="stats"></div>
+        </div>
+        <div id="main-error" class="main-error hidden"></div>
 
-        <!-- Filters & Actions -->
-        <section id="filter-section" class="card hidden">
-            <h2>Filter &amp; Aktionen</h2>
-            <div class="filter-row">
-                <div class="filter-group">
-                    <label for="filter-search">Suche</label>
-                    <input type="text" id="filter-search" placeholder="Aufgabe suchen..." oninput="applyFilters()">
+        <!-- Filters -->
+        <section id="filter-section" class="filter-bar hidden">
+            <div class="filter-row-top">
+                <input type="text" id="filter-search" placeholder="Suchen..." oninput="applyFilters()">
+                <select id="filter-label" onchange="applyFilters()">
+                    <option value="">Label: Alle</option>
+                </select>
+            </div>
+            <div class="toggle-filters">
+                <div class="toggle-group">
+                    <span class="toggle-label">Status</span>
+                    <div class="toggle-buttons" id="filter-status-toggles">
+                        <button class="toggle-btn active" data-value="open">Offen</button>
+                        <button class="toggle-btn" data-value="completed">Erledigt</button>
+                    </div>
                 </div>
-                <div class="filter-group">
-                    <label for="filter-priority">Priorit&auml;t</label>
-                    <select id="filter-priority" onchange="applyFilters()">
-                        <option value="">Alle</option>
-                        <option value="4">P1 (Dringend)</option>
-                        <option value="3">P2 (Hoch)</option>
-                        <option value="2">P3 (Mittel)</option>
-                        <option value="1">P4 (Normal)</option>
-                    </select>
+                <div class="toggle-group">
+                    <span class="toggle-label">Prio</span>
+                    <div class="toggle-buttons" id="filter-priority-toggles">
+                        <button class="toggle-btn active p1" data-value="4">P1</button>
+                        <button class="toggle-btn active p2" data-value="3">P2</button>
+                        <button class="toggle-btn active p3" data-value="2">P3</button>
+                        <button class="toggle-btn active p4" data-value="1">P4</button>
+                    </div>
                 </div>
-                <div class="filter-group">
-                    <label for="filter-label">Label</label>
-                    <select id="filter-label" onchange="applyFilters()">
-                        <option value="">Alle</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="filter-due">F&auml;lligkeit</label>
-                    <select id="filter-due" onchange="applyFilters()">
-                        <option value="">Alle</option>
-                        <option value="overdue">&Uuml;berf&auml;llig</option>
-                        <option value="today">Heute</option>
-                        <option value="week">Diese Woche</option>
-                        <option value="nodue">Ohne Datum</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="filter-status">Status</label>
-                    <select id="filter-status" onchange="applyFilters()">
-                        <option value="open">Offen</option>
-                        <option value="completed">Erledigt</option>
-                    </select>
+                <div class="toggle-group" id="assignee-toggle-group" style="display:none">
+                    <span class="toggle-label">Verantw.</span>
+                    <div class="toggle-buttons" id="filter-assignee-toggles"></div>
                 </div>
             </div>
-
             <div class="action-row">
                 <div class="selection-info">
                     <label class="checkbox-label">
                         <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
-                        Alle ausw&auml;hlen
+                        Alle
                     </label>
-                    <span id="selection-count">0 ausgew&auml;hlt</span>
+                    <span id="selection-count"></span>
                 </div>
-                <div class="action-buttons">
-                    <button class="btn-danger" onclick="reopenSelected()" title="Ausgew&auml;hlte Aufgaben als unerledigt markieren">Als unerledigt markieren</button>
-                    <button class="btn-success" onclick="completeSelected()" title="Ausgew&auml;hlte Aufgaben als erledigt markieren">Als erledigt markieren</button>
+                <div class="bulk-actions" id="bulk-actions" style="display:none">
+                    <button class="btn-small btn-danger" onclick="reopenSelected()">Unerledigt</button>
+                    <button class="btn-small btn-success" onclick="completeSelected()">Erledigt</button>
+                </div>
+                <div class="section-controls" id="section-controls" style="display:none">
+                    <button class="btn-small" onclick="expandAll()">Aufklappen</button>
+                    <button class="btn-small" onclick="collapseAll()">Zuklappen</button>
                 </div>
             </div>
         </section>
 
+        <!-- Progress Bar -->
+        <div id="progress-bar" class="progress-card hidden">
+            <div class="progress-track"><div class="progress-fill"></div></div>
+            <span class="progress-text"></span>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <span>Lade Aufgaben...</span>
+        </div>
+
         <!-- Task Table -->
-        <section id="task-section" class="card hidden">
-            <div id="loading" class="hidden">
-                <div class="spinner"></div>
-                <span>Lade Aufgaben...</span>
-            </div>
+        <section id="task-section" class="hidden">
             <div class="table-wrapper">
                 <table id="task-table">
                     <thead>
                         <tr>
                             <th class="col-check"></th>
                             <th class="col-task sortable" onclick="sortBy('content')">Aufgabe <span class="sort-icon"></span></th>
-                            <th class="col-priority sortable" onclick="sortBy('priority')">Priorit&auml;t <span class="sort-icon"></span></th>
-                            <th class="col-due sortable" onclick="sortBy('due')">F&auml;lligkeit <span class="sort-icon"></span></th>
+                            <th class="col-status">Status</th>
+                            <th class="col-priority sortable" onclick="sortBy('priority')">Prio <span class="sort-icon"></span></th>
+                            <th class="col-due sortable" onclick="sortBy('due')">F&auml;llig <span class="sort-icon"></span></th>
+                            <th class="col-assignee sortable" onclick="sortBy('assignee')">Verantw. <span class="sort-icon"></span></th>
                             <th class="col-labels">Labels</th>
-                            <th class="col-section sortable" onclick="sortBy('section')">Abschnitt <span class="sort-icon"></span></th>
+                            <th class="col-actions"></th>
                         </tr>
                     </thead>
                     <tbody id="task-body"></tbody>
                 </table>
             </div>
             <p id="no-tasks" class="hidden">Keine Aufgaben gefunden.</p>
-            <p id="task-count" class="task-count"></p>
+            <div id="stats-bottom" class="stats stats-bottom"></div>
         </section>
 
-        <!-- Status Toast -->
+        <!-- Context Menu -->
+        <div id="context-menu" class="context-menu hidden">
+            <button onclick="ctxAction('reopen')">Als unerledigt markieren</button>
+            <button onclick="ctxAction('complete')">Als erledigt markieren</button>
+        </div>
+
+        <!-- Toast -->
         <div id="toast" class="toast hidden"></div>
     </div>
 
