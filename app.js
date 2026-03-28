@@ -35,6 +35,7 @@ async function apiPaginated(path) {
         let url = cursor ? path + (path.includes('?') ? '&' : '?') + 'cursor=' + cursor : path;
         if (!url.includes('limit=')) url += (url.includes('?') ? '&' : '?') + 'limit=200';
         const d = await api('GET', url);
+        if (!d) return all;
         if (Array.isArray(d)) return all.concat(d);
         all = all.concat(d.results || []);
         cursor = d.nextCursor || null;
@@ -46,6 +47,7 @@ async function fetchAllCompleted(projectId) {
     let all = [], offset = 0;
     do {
         const d = await api('GET', `/tasks/completed?projectId=${projectId}&limit=200&offset=${offset}`);
+        if (!d) break;
         const items = d.items || d.results || [];
         all = all.concat(items);
         if (items.length < 200) break;
@@ -77,9 +79,12 @@ async function parallelLimit(tasks, limit, onProgress) {
 // ── Progress ──
 async function showProgress(cur, total, label) {
     const bar = document.getElementById('progress-bar');
+    if (!bar) return;
     bar.classList.remove('hidden');
-    bar.querySelector('.progress-fill').style.width = Math.round(cur / total * 100) + '%';
-    bar.querySelector('.progress-text').textContent = `${label}: ${cur}/${total}`;
+    const fill = bar.querySelector('.progress-fill');
+    const txt = bar.querySelector('.progress-text');
+    if (fill) fill.style.width = Math.round(cur / total * 100) + '%';
+    if (txt) txt.textContent = `${label}: ${cur}/${total}`;
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 }
 function hideProgress() { document.getElementById('progress-bar').classList.add('hidden'); }
@@ -243,6 +248,7 @@ async function loadTasks(force) {
         showUI();
         showToast(`${open.length} offen + ${completed.length} erledigt.`, 'success');
     } catch (e) {
+        console.error('loadTasks error:', e);
         showToast('Fehler: ' + e.message, 'error');
     } finally {
         document.getElementById('loading').classList.add('hidden');
@@ -250,11 +256,16 @@ async function loadTasks(force) {
 }
 
 function showUI() {
-    populateAssigneeToggles();
-    populateLabelFilter();
-    document.getElementById('filter-section').classList.remove('hidden');
-    document.getElementById('task-section').classList.remove('hidden');
-    applyFilters();
+    try {
+        populateAssigneeToggles();
+        populateLabelFilter();
+        document.getElementById('filter-section').classList.remove('hidden');
+        document.getElementById('task-section').classList.remove('hidden');
+        applyFilters();
+    } catch (e) {
+        console.error('showUI error:', e);
+        throw e;
+    }
 }
 
 // ── Populate dynamic filters ──
@@ -262,6 +273,7 @@ function populateAssigneeToggles() {
     const c = document.getElementById('filter-assignee-toggles');
     const names = Object.entries(collaborators);
     const group = document.getElementById('assignee-toggle-group');
+    if (!group || !c) return;
     if (names.length === 0) { group.style.display = 'none'; return; }
     group.style.display = '';
     c.innerHTML = '';
@@ -545,6 +557,7 @@ function showCtxMenu(e, taskId) {
     ctxTaskId = taskId;
     hideListMenu();
     const menu = document.getElementById('context-menu');
+    if (!menu) return;
     menu.classList.remove('hidden');
     const rect = e.currentTarget.getBoundingClientRect();
     const menuH = 320;
@@ -553,7 +566,7 @@ function showCtxMenu(e, taskId) {
     menu.style.left = Math.min(rect.left, window.innerWidth - 220) + 'px';
 }
 
-function hideCtxMenu() { document.getElementById('context-menu').classList.add('hidden'); ctxTaskId = null; }
+function hideCtxMenu() { const m = document.getElementById('context-menu'); if (m) m.classList.add('hidden'); ctxTaskId = null; }
 
 async function ctxAction(action, value) {
     const id = ctxTaskId;
@@ -649,6 +662,7 @@ function showListMenu(e) {
     e.stopPropagation();
     hideCtxMenu();
     const menu = document.getElementById('list-menu');
+    if (!menu) return;
     const hasSel = selectedIds.size > 0;
     menu.querySelectorAll('button').forEach(b => {
         if (b.textContent.startsWith('Auswahl:')) b.style.display = hasSel ? '' : 'none';
@@ -661,7 +675,7 @@ function showListMenu(e) {
     menu.style.top = rect.bottom + 4 + 'px';
     menu.style.left = Math.min(rect.right - 200, window.innerWidth - 220) + 'px';
 }
-function hideListMenu() { document.getElementById('list-menu').classList.add('hidden'); }
+function hideListMenu() { const m = document.getElementById('list-menu'); if (m) m.classList.add('hidden'); }
 
 function listMenuAction(action) {
     hideListMenu();
