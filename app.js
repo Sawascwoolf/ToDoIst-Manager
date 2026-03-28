@@ -216,7 +216,9 @@ async function loadTasks(force) {
     if (!force) {
         const c = getCached(pid);
         if (c) {
-            sections = c.sections; collaborators = c.collaborators; allTasks = [...c.open, ...c.completed];
+            sections = c.sections; collaborators = c.collaborators;
+            const seenC = new Set(); allTasks = [];
+            [...c.open, ...c.completed].forEach(t => { if (!seenC.has(t.id)) { seenC.add(t.id); allTasks.push(t); } });
             showUI(); showToast(`${allTasks.length} Aufgaben (Cache).`, 'success'); return;
         }
     }
@@ -244,7 +246,12 @@ async function loadTasks(force) {
         collaborators = cols;
 
         taskCache[pid] = { open, completed, sections: secs, collaborators: cols, ts: Date.now() };
-        allTasks = [...open, ...completed];
+        // Deduplicate: open tasks take priority over completed with same ID
+        const seen = new Set();
+        allTasks = [];
+        [...open, ...completed].forEach(t => {
+            if (!seen.has(t.id)) { seen.add(t.id); allTasks.push(t); }
+        });
         showUI();
         showToast(`${open.length} offen + ${completed.length} erledigt.`, 'success');
     } catch (e) {
