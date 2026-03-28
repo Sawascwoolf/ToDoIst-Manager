@@ -56,7 +56,7 @@ async function fetchAllCompleted(projectId) {
         priority: i.priority || 1, labels: i.labels || [], due: i.due || null,
         sectionId: i.sectionId || i.section_id || null,
         parentId: i.parentId || i.parent_id || null,
-        responsibleUid: i.responsibleUid || null, _status: 'completed',
+        responsible_uid: i.responsible_uid || i.responsibleUid || null, _status: 'completed',
     }));
 }
 
@@ -233,7 +233,7 @@ async function loadTasks(force) {
         const secs = {}; secList.forEach(s => { secs[s.id] = s.name; }); sections = secs;
         const cols = {}; collabList.forEach(c => { cols[c.id] = c.name || c.email || c.id; });
         [...open, ...completed].forEach(t => {
-            const uid = t.responsibleUid || t.assigneeId || t.assignee_id;
+            const uid = t.responsible_uid || t.responsibleUid || t.assignee_id || t.assigneeId;
             if (uid && !cols[uid]) cols[uid] = uid;
         });
         collaborators = cols;
@@ -333,6 +333,16 @@ function isHiddenByCollapse(task) {
     return collapsedIds.has('sec_' + sid);
 }
 
+// ── Reset all filters ──
+function resetAllFilters() {
+    document.getElementById('filter-search').value = '';
+    document.getElementById('filter-label').value = '';
+    document.querySelectorAll('#filter-status-toggles .toggle-btn').forEach(b => b.classList.add('active'));
+    document.querySelectorAll('#filter-priority-toggles .toggle-btn').forEach(b => b.classList.add('active'));
+    document.querySelectorAll('#filter-assignee-toggles .toggle-btn:not([data-value="__select_all__"])').forEach(b => b.classList.add('active'));
+    applyFilters();
+}
+
 // ── Filters ──
 function applyFilters() {
     const search = document.getElementById('filter-search').value.toLowerCase();
@@ -352,7 +362,7 @@ function applyFilters() {
         }
         if (label && !(t.labels || []).includes(label)) return false;
         if (assignees.length > 0) {
-            const uid = t.responsibleUid || t.assigneeId || t.assignee_id;
+            const uid = t.responsible_uid || t.responsibleUid || t.assignee_id || t.assigneeId;
             if (!uid && !assignees.includes('__none__')) return false;
             if (uid && !assignees.includes(uid)) return false;
         }
@@ -395,7 +405,7 @@ function sortTasks() {
 // ── Helpers ──
 const PRIO = { 4: 'P1', 3: 'P2', 2: 'P3', 1: 'P4' };
 function getSid(t) { return t.sectionId || t.section_id || null; }
-function getAssignee(t) { const u = t.responsibleUid || t.assigneeId || t.assignee_id; return u ? (collaborators[u] || u) : ''; }
+function getAssignee(t) { const u = t.responsible_uid || t.responsibleUid || t.assignee_id || t.assigneeId; return u ? (collaborators[u] || u) : ''; }
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function fmtDate(s) { return new Date(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
 
@@ -535,29 +545,140 @@ function collapseAll() {
 function showCtxMenu(e, taskId) {
     e.stopPropagation();
     ctxTaskId = taskId;
+    hideListMenu();
     const menu = document.getElementById('context-menu');
     menu.classList.remove('hidden');
     const rect = e.currentTarget.getBoundingClientRect();
-    menu.style.top = rect.bottom + 4 + 'px';
+    const menuH = 320;
+    const top = (rect.bottom + menuH > window.innerHeight) ? Math.max(4, rect.top - menuH) : rect.bottom + 4;
+    menu.style.top = top + 'px';
     menu.style.left = Math.min(rect.left, window.innerWidth - 220) + 'px';
 }
 
 function hideCtxMenu() { document.getElementById('context-menu').classList.add('hidden'); ctxTaskId = null; }
 
-async function ctxAction(action) {
+async function ctxAction(action, value) {
     const id = ctxTaskId;
     hideCtxMenu();
     if (!id) return;
+    const task = allTasks.find(t => t.id === id);
     try {
-        if (action === 'complete') { await api('POST', `/tasks/${id}/close`); updateTaskStatusLocally(id, 'completed'); }
-        else if (action === 'reopen') { await api('POST', `/tasks/${id}/reopen`); updateTaskStatusLocally(id, 'open'); }
-        showToast(action === 'complete' ? 'Erledigt.' : 'Wieder geöffnet.', 'success');
+        if (action === 'complete') {
+            await api('POST', `/tasks/${id}/close`);
+            updateTaskStatusLocally(id, 'completed');
+            showToast('Erledigt.', 'success', async () => {
+                await api('POST', `/tasks/${id}/reopen`);
+                updateTaskStatusLocally(id, 'open');
+                applyFilters();
+            });
+        } else if (action === 'reopen') {
+            await api('POST', `/tasks/${id}/reopen`);
+            updateTaskStatusLocally(id, 'open');
+            showToast('Wieder geöffnet.', 'success', async () => {
+                await api('POST', `/tasks/${id}/close`);
+                updateTaskStatusLocally(id, 'completed');
+                applyFilters();
+            });
+        } else if (action === 'priority') {
+            const oldPrio = task ? task.priority : null;
+            await api('POST', `/tasks/${id}`, { priority: value });
+            if (task) task.priority = value;
+            invalidateCache(currentProjectId);
+            showToast(`Priorität → ${PRIO[value]}`, 'success', oldPrio != null ? async () => {
+                await api('POST', `/tasks/${id}`, { priority: oldPrio });
+                if (task) task.priority = oldPrio;
+                invalidateCache(currentProjectId);
+                applyFilters();
+            } : null);
+        } else if (action === 'editDue') {
+            const input = document.getElementById('due-date-input');
+            input.value = task && task.due ? task.due.date : '';
+            const dlg = document.getElementById('due-dialog');
+            dlg._taskId = id;
+            dlg.classList.remove('hidden');
+            return;
+        } else if (action === 'duplicate') {
+            if (!task) return;
+            const body = { content: task.content, project_id: currentProjectId, priority: task.priority };
+            if (task.description) body.description = task.description;
+            if (task.labels && task.labels.length) body.labels = task.labels;
+            if (task.due) body.due_date = task.due.date;
+            if (task.parent_id || task.parentId) body.parent_id = task.parent_id || task.parentId;
+            if (task.section_id || task.sectionId) body.section_id = task.section_id || task.sectionId;
+            const newTask = await api('POST', '/tasks', body);
+            invalidateCache(currentProjectId);
+            await loadTasks(true);
+            showToast('Aufgabe dupliziert.', 'success');
+        } else if (action === 'delete') {
+            await api('DELETE', `/tasks/${id}`);
+            allTasks = allTasks.filter(t => t.id !== id);
+            invalidateCache(currentProjectId);
+            showToast('Aufgabe gelöscht.', 'success');
+        } else if (action === 'openTodoist') {
+            window.open(todoistUrl(id), '_blank');
+            return;
+        }
         applyFilters();
     } catch (e) { showToast('Fehler: ' + e.message, 'error'); }
 }
 
+// ── Due Date Dialog ──
+function closeDueDialog() { document.getElementById('due-dialog').classList.add('hidden'); }
+async function saveDueDate(dateVal) {
+    const id = ctxTaskId || document.getElementById('due-dialog')._taskId;
+    closeDueDialog();
+    if (!id) return;
+    const task = allTasks.find(t => t.id === id);
+    const oldDue = task && task.due ? task.due.date : null;
+    try {
+        const body = dateVal ? { due_date: dateVal } : { due_string: 'no date' };
+        await api('POST', `/tasks/${id}`, body);
+        if (task) task.due = dateVal ? { date: dateVal } : null;
+        invalidateCache(currentProjectId);
+        showToast(dateVal ? `Fällig: ${fmtDate(dateVal)}` : 'Fälligkeitsdatum entfernt.', 'success', async () => {
+            const undoBody = oldDue ? { due_date: oldDue } : { due_string: 'no date' };
+            await api('POST', `/tasks/${id}`, undoBody);
+            if (task) task.due = oldDue ? { date: oldDue } : null;
+            invalidateCache(currentProjectId);
+            applyFilters();
+        });
+        applyFilters();
+    } catch (e) { showToast('Fehler: ' + e.message, 'error'); }
+}
+
+// ── List Menu (replaces bulk action buttons) ──
+function showListMenu(e) {
+    e.stopPropagation();
+    hideCtxMenu();
+    const menu = document.getElementById('list-menu');
+    const hasSel = selectedIds.size > 0;
+    menu.querySelectorAll('button').forEach(b => {
+        if (b.textContent.startsWith('Auswahl:')) b.style.display = hasSel ? '' : 'none';
+    });
+    // Hide first separator if no selection buttons visible
+    const seps = menu.querySelectorAll('.ctx-separator');
+    if (seps[0]) seps[0].style.display = hasSel ? '' : 'none';
+    menu.classList.remove('hidden');
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu.style.top = rect.bottom + 4 + 'px';
+    menu.style.left = Math.min(rect.right - 200, window.innerWidth - 220) + 'px';
+}
+function hideListMenu() { document.getElementById('list-menu').classList.add('hidden'); }
+
+function listMenuAction(action) {
+    hideListMenu();
+    if (action === 'reopenSelected') reopenSelected();
+    else if (action === 'completeSelected') completeSelected();
+    else if (action === 'expandAll') expandAll();
+    else if (action === 'collapseAll') collapseAll();
+    else if (action === 'refresh') loadTasks(true);
+}
+
 document.addEventListener('click', e => {
-    if (!e.target.closest('.context-menu') && !e.target.closest('.actions-btn')) hideCtxMenu();
+    if (!e.target.closest('.context-menu') && !e.target.closest('.actions-btn') && !e.target.closest('.list-actions-btn')) {
+        hideCtxMenu();
+        hideListMenu();
+    }
 });
 
 // ── Inline status toggle (no page reload!) ──
@@ -568,13 +689,20 @@ async function toggleTaskStatus(taskId, cb) {
         if (cb.checked) {
             await api('POST', `/tasks/${taskId}/close`);
             updateTaskStatusLocally(taskId, 'completed');
-            showToast('Erledigt.', 'success');
+            showToast('Erledigt.', 'success', async () => {
+                await api('POST', `/tasks/${taskId}/reopen`);
+                updateTaskStatusLocally(taskId, 'open');
+                applyFilters();
+            });
         } else {
             await api('POST', `/tasks/${taskId}/reopen`);
             updateTaskStatusLocally(taskId, 'open');
-            showToast('Wieder geöffnet.', 'success');
+            showToast('Wieder geöffnet.', 'success', async () => {
+                await api('POST', `/tasks/${taskId}/close`);
+                updateTaskStatusLocally(taskId, 'completed');
+                applyFilters();
+            });
         }
-        // Re-apply filters to update view without full reload
         applyFilters();
     } catch (e) {
         cb.checked = was;
@@ -602,48 +730,66 @@ function toggleSelectAll() {
 function updateSelectionUI() {
     const n = selectedIds.size;
     document.getElementById('selection-count').textContent = n > 0 ? `${n} ausgewählt` : '';
-    document.getElementById('bulk-actions').style.display = n > 0 ? '' : 'none';
     document.getElementById('select-all').checked = filteredTasks.length > 0 && n === filteredTasks.length;
 }
 
 // ── Bulk Actions ──
-function setActionsDisabled(d) { document.querySelectorAll('.bulk-actions button').forEach(b => b.disabled = d); }
-
 async function reopenSelected() {
     if (!selectedIds.size) return;
-    setActionsDisabled(true);
     const ids = [...selectedIds];
     const { completed, failed } = await parallelLimit(
         ids.map(id => () => api('POST', `/tasks/${id}/reopen`)), 5,
         (d, t) => showProgress(d, t, 'Unerledigt'));
-    hideProgress(); setActionsDisabled(false);
-    // Update local cache
+    hideProgress();
     ids.forEach(id => updateTaskStatusLocally(id, 'open'));
-    showToast(failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als unerledigt markiert.`, failed ? 'error' : 'success');
+    const msg = failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als unerledigt markiert.`;
+    showToast(msg, failed ? 'error' : 'success', !failed ? async () => {
+        await parallelLimit(ids.map(id => () => api('POST', `/tasks/${id}/close`)), 5);
+        ids.forEach(id => updateTaskStatusLocally(id, 'completed'));
+        applyFilters();
+    } : null);
     selectedIds.clear();
     applyFilters();
 }
 
 async function completeSelected() {
     if (!selectedIds.size) return;
-    setActionsDisabled(true);
     const ids = [...selectedIds];
     const { completed, failed } = await parallelLimit(
         ids.map(id => () => api('POST', `/tasks/${id}/close`)), 5,
         (d, t) => showProgress(d, t, 'Erledigt'));
-    hideProgress(); setActionsDisabled(false);
+    hideProgress();
     ids.forEach(id => updateTaskStatusLocally(id, 'completed'));
-    showToast(failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als erledigt markiert.`, failed ? 'error' : 'success');
+    const msg = failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als erledigt markiert.`;
+    showToast(msg, failed ? 'error' : 'success', !failed ? async () => {
+        await parallelLimit(ids.map(id => () => api('POST', `/tasks/${id}/reopen`)), 5);
+        ids.forEach(id => updateTaskStatusLocally(id, 'open'));
+        applyFilters();
+    } : null);
     selectedIds.clear();
     applyFilters();
 }
 
-// ── Toast ──
-function showToast(msg, type) {
+// ── Toast with Undo ──
+let undoFn = null;
+function showToast(msg, type, undoCallback) {
     const t = document.getElementById('toast');
-    t.textContent = msg; t.className = 'toast' + (type ? ' toast-' + type : '');
+    const msgEl = document.getElementById('toast-msg');
+    const undoBtn = document.getElementById('toast-undo');
+    msgEl.textContent = msg;
+    t.className = 'toast' + (type ? ' toast-' + type : '');
     t.classList.remove('hidden');
-    clearTimeout(t._t); t._t = setTimeout(() => t.classList.add('hidden'), 3000);
+    undoFn = undoCallback || null;
+    if (undoCallback) { undoBtn.classList.remove('hidden'); } else { undoBtn.classList.add('hidden'); }
+    clearTimeout(t._t);
+    t._t = setTimeout(() => { t.classList.add('hidden'); undoFn = null; }, undoCallback ? 6000 : 3000);
+}
+async function executeUndo() {
+    if (!undoFn) return;
+    const fn = undoFn;
+    undoFn = null;
+    document.getElementById('toast').classList.add('hidden');
+    try { await fn(); } catch (e) { showToast('Rückgängig fehlgeschlagen: ' + e.message, 'error'); }
 }
 
 // ── Init ──

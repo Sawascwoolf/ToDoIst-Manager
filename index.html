@@ -24,7 +24,7 @@
                 <p id="auth-error" class="error hidden"></p>
             </div>
         </div>
-        <div class="sidebar-footer">Build #13</div>
+        <div class="sidebar-footer"></div>
     </aside>
     <div id="sidebar-overlay" class="sidebar-overlay hidden" onclick="toggleSidebar()"></div>
 
@@ -36,6 +36,7 @@
                 <option value="">Verbinde...</option>
             </select>
             <div id="stats-top" class="stats"></div>
+            <div class="build-badge">Build #14</div>
         </div>
         <div id="main-error" class="main-error hidden"></div>
 
@@ -46,6 +47,7 @@
                 <select id="filter-label" onchange="applyFilters()">
                     <option value="">Label: Alle</option>
                 </select>
+                <button class="btn-reset-all" onclick="resetAllFilters()">Alle Aufgaben</button>
             </div>
             <div class="toggle-filters">
                 <div class="toggle-group">
@@ -77,13 +79,17 @@
                     </label>
                     <span id="selection-count"></span>
                 </div>
-                <div class="bulk-actions" id="bulk-actions" style="display:none">
-                    <button class="btn-small btn-danger" onclick="reopenSelected()">Unerledigt</button>
-                    <button class="btn-small btn-success" onclick="completeSelected()">Erledigt</button>
-                </div>
-                <div class="section-controls" id="section-controls" style="display:none">
-                    <button class="btn-small" onclick="expandAll()">Aufklappen</button>
-                    <button class="btn-small" onclick="collapseAll()">Zuklappen</button>
+                <div class="list-menu-wrapper" id="list-menu-wrapper">
+                    <button class="actions-btn list-actions-btn" onclick="showListMenu(event)" title="Aktionen">&#8943;</button>
+                    <div id="list-menu" class="context-menu hidden">
+                        <button onclick="listMenuAction('reopenSelected')">Auswahl: Als unerledigt</button>
+                        <button onclick="listMenuAction('completeSelected')">Auswahl: Als erledigt</button>
+                        <div class="ctx-separator"></div>
+                        <button onclick="listMenuAction('expandAll')">Alle aufklappen</button>
+                        <button onclick="listMenuAction('collapseAll')">Alle zuklappen</button>
+                        <div class="ctx-separator"></div>
+                        <button onclick="listMenuAction('refresh')">Neu laden</button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -125,12 +131,44 @@
 
         <!-- Context Menu -->
         <div id="context-menu" class="context-menu hidden">
-            <button onclick="ctxAction('reopen')">Als unerledigt markieren</button>
             <button onclick="ctxAction('complete')">Als erledigt markieren</button>
+            <button onclick="ctxAction('reopen')">Als unerledigt markieren</button>
+            <div class="ctx-separator"></div>
+            <div class="ctx-submenu-wrap">
+                <button class="ctx-has-sub">Priorit&auml;t &auml;ndern &#9656;</button>
+                <div class="ctx-submenu">
+                    <button onclick="ctxAction('priority',4)"><span class="priority-dot p1-dot"></span> P1</button>
+                    <button onclick="ctxAction('priority',3)"><span class="priority-dot p2-dot"></span> P2</button>
+                    <button onclick="ctxAction('priority',2)"><span class="priority-dot p3-dot"></span> P3</button>
+                    <button onclick="ctxAction('priority',1)"><span class="priority-dot p4-dot"></span> P4</button>
+                </div>
+            </div>
+            <button onclick="ctxAction('editDue')">F&auml;lligkeitsdatum &auml;ndern</button>
+            <div class="ctx-separator"></div>
+            <button onclick="ctxAction('duplicate')">Duplizieren</button>
+            <button onclick="ctxAction('openTodoist')">In Todoist &ouml;ffnen</button>
+            <div class="ctx-separator"></div>
+            <button class="ctx-danger" onclick="ctxAction('delete')">L&ouml;schen</button>
+        </div>
+
+        <!-- Due Date Dialog -->
+        <div id="due-dialog" class="modal-overlay hidden" onclick="if(event.target===this)closeDueDialog()">
+            <div class="modal-card">
+                <h3>F&auml;lligkeitsdatum</h3>
+                <input type="date" id="due-date-input">
+                <div class="modal-actions">
+                    <button class="btn-small" onclick="closeDueDialog()">Abbrechen</button>
+                    <button class="btn-small btn-danger" onclick="saveDueDate(null)">Entfernen</button>
+                    <button class="btn-small btn-success" onclick="saveDueDate(document.getElementById('due-date-input').value)">Speichern</button>
+                </div>
+            </div>
         </div>
 
         <!-- Toast -->
-        <div id="toast" class="toast hidden"></div>
+        <div id="toast" class="toast hidden">
+            <span id="toast-msg"></span>
+            <button id="toast-undo" class="toast-undo hidden" onclick="executeUndo()">R&uuml;ckg&auml;ngig</button>
+        </div>
     </div>
 
     <script src="app.js"></script>
