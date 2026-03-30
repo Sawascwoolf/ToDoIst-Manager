@@ -50,7 +50,7 @@ function buildHierarchy(tasks) {
     return result;
 }
 
-function isHiddenByCollapse(task) {
+function isHiddenByCollapse(task, checkSections) {
     const map = new Map(); S.filteredTasks.forEach(t => map.set(t.id, t));
     let pid = task.parentId || task.parent_id;
     while (pid) {
@@ -59,8 +59,11 @@ function isHiddenByCollapse(task) {
         if (!parent) break;
         pid = parent.parentId || parent.parent_id;
     }
-    const sid = task.sectionId || task.section_id || '__none__';
-    return S.collapsedIds.has('sec_' + sid);
+    if (checkSections) {
+        const sid = task.sectionId || task.section_id || '__none__';
+        return S.collapsedIds.has('sec_' + sid);
+    }
+    return false;
 }
 
 // ── Stats ──
@@ -104,7 +107,7 @@ function renderTable() {
         }
         if (!secCollapsed) {
             g.tasks.forEach(t => {
-                if (hasSections && isHiddenByCollapse(t)) return;
+                if (isHiddenByCollapse(t, hasSections)) return;
                 html += taskRow(t, today);
             });
         }
