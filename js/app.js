@@ -99,15 +99,6 @@ async function loadTasks(force) {
         ]);
         open.forEach(t => { t._status = 'open'; });
 
-        // Debug: log specific tasks
-        const debugNames = ['auto reserveradmulde', 'auto kiste 1', 'akkuschrauber'];
-        open.filter(t => debugNames.some(n => t.content.toLowerCase().includes(n))).forEach(t => {
-            console.log(`[DEBUG] Open task "${t.content}":`, JSON.stringify({ id: t.id, parent_id: t.parent_id, parentId: t.parentId, children: t.children, sub_tasks: t.sub_tasks }));
-        });
-        completed.filter(t => debugNames.some(n => t.content.toLowerCase().includes(n))).forEach(t => {
-            console.log(`[DEBUG] Completed task "${t.content}" (after fetch):`, JSON.stringify({ id: t.id, parent_id: t.parent_id, parentId: t.parentId }));
-        });
-
         const secs = {}; secList.forEach(s => { secs[s.id] = s.name; }); S.sections = secs;
         const cols = {}; collabList.forEach(c => { cols[c.id] = c.name || c.email || c.id; });
         [...open, ...completed].forEach(t => {
