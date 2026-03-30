@@ -36,14 +36,17 @@
                 <option value="">Verbinde...</option>
             </select>
             <div id="stats-top" class="stats"></div>
-            <div class="build-badge">Build #32</div>
+            <div class="build-badge">Build #33</div>
         </div>
         <div id="main-error" class="main-error hidden"></div>
 
         <!-- Filters -->
         <section id="filter-section" class="filter-bar hidden">
             <div class="filter-row-top">
-                <input type="text" id="filter-search" placeholder="Suchen..." oninput="applyFilters()">
+                <div class="search-wrap">
+                    <input type="text" id="filter-search" placeholder="Suchen..." oninput="applyFilters()">
+                    <button class="search-clear hidden" id="search-clear" onclick="clearSearch()">&times;</button>
+                </div>
                 <select id="filter-label" onchange="applyFilters()">
                     <option value="">Label: Alle</option>
                 </select>

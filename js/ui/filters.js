@@ -113,9 +113,17 @@ function resetAllFilters() {
     applyFilters();
 }
 
+function clearSearch() {
+    document.getElementById('filter-search').value = '';
+    document.getElementById('search-clear').classList.add('hidden');
+    applyFilters();
+}
+
 // ── Filters ──
 function applyFilters() {
     const search = document.getElementById('filter-search').value.toLowerCase();
+    const clearBtn = document.getElementById('search-clear');
+    if (clearBtn) clearBtn.classList.toggle('hidden', !search);
     const label = document.getElementById('filter-label').value;
     const statuses = getActiveValues('filter-status-toggles');
     const priorities = getActiveValues('filter-priority-toggles');

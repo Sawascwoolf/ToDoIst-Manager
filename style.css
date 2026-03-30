@@ -52,8 +52,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 /* ── Filter Bar ── */
 .filter-bar { background: var(--card-bg); border-radius: 6px; padding: 12px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
 .filter-row-top { display: flex; gap: 8px; margin-bottom: 10px; }
-.filter-row-top input { flex: 2; padding: 7px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; }
-.filter-row-top input:focus { outline: none; border-color: var(--primary); }
+.search-wrap { flex: 2; position: relative; display: flex; }
+.search-wrap input { flex: 1; padding: 7px 28px 7px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; }
+.search-wrap input:focus { outline: none; border-color: var(--primary); }
+.search-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: none; font-size: 1.1rem; color: var(--text-muted); cursor: pointer; padding: 0 4px; line-height: 1; }
+.search-clear:hover { color: var(--text); }
 .filter-row-top select { flex: 1; padding: 7px; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; min-width: 120px; }
 .btn-reset-all { padding: 7px 16px; background: var(--primary); color: #fff; border: none; border-radius: 4px; font-size: 0.85rem; font-weight: 700; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: background 0.15s; }
 .btn-reset-all:hover { background: var(--primary-hover); }
