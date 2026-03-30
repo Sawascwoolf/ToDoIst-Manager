@@ -46,10 +46,16 @@ async function fetchAllCompleted(projectId) {
     }));
 
     // Batch-fetch full task details to recover parent_id
+    const debugNames = ['auto reserveradmulde', 'auto kiste 1', 'akkuschrauber'];
     await parallelLimit(
         tasks.map(t => async () => {
             try {
                 const full = await api('GET', `/tasks/${t.id}`);
+                const isDebug = debugNames.some(n => t.content.toLowerCase().includes(n));
+                if (isDebug) {
+                    console.log(`[DEBUG] Completed API "${t.content}":`, JSON.stringify({ id: t.id, parent_id: t.parent_id, parentId: t.parentId }));
+                    console.log(`[DEBUG] GET /tasks/${t.id} "${t.content}":`, full ? JSON.stringify({ parent_id: full.parent_id, parentId: full.parentId, child_order: full.child_order, children: full.children, sub_tasks: full.sub_tasks }) : 'NULL');
+                }
                 if (full) {
                     t.parent_id = full.parent_id || full.parentId || null;
                     t.parentId = t.parent_id;
@@ -57,9 +63,12 @@ async function fetchAllCompleted(projectId) {
                     if (full.labels && full.labels.length) t.labels = full.labels;
                     if (full.priority) t.priority = full.priority;
                 }
-            } catch { /* task may be truly deleted, skip */ }
+            } catch (e) {
+                const isDebug = debugNames.some(n => t.content.toLowerCase().includes(n));
+                if (isDebug) console.log(`[DEBUG] GET /tasks/${t.id} "${t.content}" FAILED:`, e.message);
+            }
         }),
-        10 // parallel limit
+        10
     );
 
     return tasks;
