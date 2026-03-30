@@ -94,12 +94,22 @@ function openCreateTaskDialog(parentId) {
     document.getElementById('new-task-content').value = '';
     document.getElementById('new-task-priority').value = '1';
 
-    // Populate assignee
-    const assigneeSel = document.getElementById('new-task-assignee');
-    if (assigneeSel) {
-        assigneeSel.innerHTML = '<option value="">Niemand</option>';
+    // Populate assignee chips
+    const assigneeCont = document.getElementById('new-task-assignee');
+    if (assigneeCont) {
+        assigneeCont.innerHTML = '';
         Object.entries(S.collaborators).forEach(([uid, name]) => {
-            assigneeSel.innerHTML += `<option value="${uid}">${esc(name)}</option>`;
+            const chip = document.createElement('span');
+            chip.className = 'assignee-chip';
+            chip.dataset.uid = uid;
+            chip.textContent = getInitials(name);
+            chip.title = name;
+            chip.onclick = () => {
+                const wasActive = chip.classList.contains('active');
+                assigneeCont.querySelectorAll('.assignee-chip').forEach(c => c.classList.remove('active'));
+                if (!wasActive) chip.classList.add('active');
+            };
+            assigneeCont.appendChild(chip);
         });
     }
 
@@ -133,7 +143,8 @@ async function confirmCreateTask() {
 
     const priority = parseInt(document.getElementById('new-task-priority').value) || 1;
     const parentId = document.getElementById('new-task-parent').value || null;
-    const assignee = document.getElementById('new-task-assignee').value || null;
+    const activeChip = document.querySelector('#new-task-assignee .assignee-chip.active');
+    const assignee = activeChip ? activeChip.dataset.uid : null;
     const labels = getSelectedLabels('new-task-labels');
 
     closeCreateTaskDialog();

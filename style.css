@@ -249,6 +249,10 @@ tr.dimmed:hover { opacity: 0.75; }
 .task-picker-list:empty { display: none; }
 .task-picker-item { padding: 6px 10px; font-size: 0.82rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .task-picker-item:hover { background: var(--row-hover); }
+.assignee-picker { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.assignee-chip { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; font-size: 0.7rem; font-weight: 700; cursor: pointer; border: 2px solid var(--border); background: #e0e0e0; color: #555; transition: all 0.12s; }
+.assignee-chip:hover { border-color: #aaa; }
+.assignee-chip.active { background: #333; color: #fff; border-color: #333; }
 .label-picker { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; margin-bottom: 8px; }
 .label-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 8px; font-size: 0.75rem; border-radius: 3px; cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--text-muted); }
 .label-chip.active { background: #e8eaf6; color: #3949ab; border-color: #c5cae9; }
