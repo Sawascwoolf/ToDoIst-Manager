@@ -35,17 +35,34 @@ async function fetchAllCompleted(projectId) {
         if (items.length < 200) break;
         offset += items.length;
     } while (true);
-    return all.map(i => {
-        console.log('completed task raw:', i.content, 'parent fields:', i.parent_id, i.parentId, i.parent_task_id);
-        return {
-            id: i.taskId || i.task_id || i.id, content: i.content, description: '',
-            priority: i.priority || 1, labels: i.labels || [], due: i.due || null,
-            sectionId: i.sectionId || i.section_id || null,
-            parentId: i.parentId || i.parent_id || i.parent_task_id || null,
-            parent_id: i.parent_id || i.parentId || i.parent_task_id || null,
-            responsible_uid: i.responsible_uid || i.responsibleUid || null, _status: 'completed',
-        };
-    });
+
+    // Completed API doesn't return parent_id. Fetch each task individually to get hierarchy.
+    const tasks = all.map(i => ({
+        id: i.taskId || i.task_id || i.id, content: i.content, description: '',
+        priority: i.priority || 1, labels: i.labels || [], due: i.due || null,
+        sectionId: i.sectionId || i.section_id || null,
+        parent_id: null, parentId: null,
+        responsible_uid: i.responsible_uid || i.responsibleUid || null, _status: 'completed',
+    }));
+
+    // Batch-fetch full task details to recover parent_id
+    await parallelLimit(
+        tasks.map(t => async () => {
+            try {
+                const full = await api('GET', `/tasks/${t.id}`);
+                if (full) {
+                    t.parent_id = full.parent_id || full.parentId || null;
+                    t.parentId = t.parent_id;
+                    if (full.responsible_uid) t.responsible_uid = full.responsible_uid;
+                    if (full.labels && full.labels.length) t.labels = full.labels;
+                    if (full.priority) t.priority = full.priority;
+                }
+            } catch { /* task may be truly deleted, skip */ }
+        }),
+        10 // parallel limit
+    );
+
+    return tasks;
 }
 
 async function parallelLimit(tasks, limit, onProgress) {
