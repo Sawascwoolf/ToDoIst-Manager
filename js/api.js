@@ -35,13 +35,17 @@ async function fetchAllCompleted(projectId) {
         if (items.length < 200) break;
         offset += items.length;
     } while (true);
-    return all.map(i => ({
-        id: i.taskId || i.task_id || i.id, content: i.content, description: '',
-        priority: i.priority || 1, labels: i.labels || [], due: i.due || null,
-        sectionId: i.sectionId || i.section_id || null,
-        parentId: i.parentId || i.parent_id || null,
-        responsible_uid: i.responsible_uid || i.responsibleUid || null, _status: 'completed',
-    }));
+    return all.map(i => {
+        console.log('completed task raw:', i.content, 'parent fields:', i.parent_id, i.parentId, i.parent_task_id);
+        return {
+            id: i.taskId || i.task_id || i.id, content: i.content, description: '',
+            priority: i.priority || 1, labels: i.labels || [], due: i.due || null,
+            sectionId: i.sectionId || i.section_id || null,
+            parentId: i.parentId || i.parent_id || i.parent_task_id || null,
+            parent_id: i.parent_id || i.parentId || i.parent_task_id || null,
+            responsible_uid: i.responsible_uid || i.responsibleUid || null, _status: 'completed',
+        };
+    });
 }
 
 async function parallelLimit(tasks, limit, onProgress) {
