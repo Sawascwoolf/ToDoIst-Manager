@@ -49,9 +49,12 @@ async function connect() {
         localStorage.setItem('todoist_token', S.token);
         // Restore last project
         const lastPid = localStorage.getItem('todoist_last_project');
-        if (lastPid && [...sel.options].some(o => o.value === lastPid)) {
-            sel.value = lastPid;
-            loadTasks();
+        if (lastPid) {
+            const match = [...sel.options].find(o => String(o.value) === String(lastPid));
+            if (match) {
+                sel.value = match.value;
+                loadTasks();
+            }
         }
         showToast(`${projects.length} Projekte geladen.`, 'success');
         if (document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
@@ -71,7 +74,7 @@ async function loadTasks(force) {
     const pid = document.getElementById('project-select').value;
     if (!pid) return;
     S.currentProjectId = pid;
-    localStorage.setItem('todoist_last_project', pid);
+    localStorage.setItem('todoist_last_project', String(pid));
 
     if (!force) {
         const c = getCached(pid);

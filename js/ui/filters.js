@@ -188,6 +188,15 @@ function toggleGrouping() {
     renderTable();
 }
 
+// Bind grouping button explicitly (in case onclick is overridden)
+(function() {
+    const btn = document.getElementById('group-toggle');
+    if (btn) btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        toggleGrouping();
+    });
+})();
+
 // ── View Configs ──
 let activeViewIdx = -1;
 
