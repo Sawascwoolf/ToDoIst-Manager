@@ -22,7 +22,11 @@ function populateTaskPicker(prefix, excludeId) {
     if (!list) return;
     list._allItems = S.allTasks
         .filter(t => t._status !== 'completed' && t.id !== excludeId)
-        .map(t => ({ id: t.id, content: t.content, depth: t._depth || 0 }));
+        .map(t => {
+            const path = getTaskPath(t.id);
+            const fullPath = [...path, t.content].join(' › ');
+            return { id: t.id, content: t.content, path: path.join(' › '), fullPath, depth: t._depth || 0 };
+        });
     if (search) search.value = '';
     renderTaskPickerList(prefix, '');
 }
@@ -35,14 +39,17 @@ function filterTaskPicker(prefix) {
 function renderTaskPickerList(prefix, query) {
     const list = document.getElementById(prefix + '-list');
     if (!list || !list._allItems) return;
-    const items = list._allItems.filter(t => !query || t.content.toLowerCase().includes(query));
+    const items = list._allItems.filter(t => !query || t.fullPath.toLowerCase().includes(query));
     list.innerHTML = '';
     items.slice(0, 30).forEach(t => {
         const div = document.createElement('div');
         div.className = 'task-picker-item';
-        const indent = t.depth > 0 ? '  '.repeat(t.depth) + '└ ' : '';
-        div.textContent = indent + t.content.substring(0, 60);
-        div.onclick = () => selectTaskPickerItem(prefix, t.id, t.content);
+        if (t.path) {
+            div.innerHTML = `<span class="task-picker-path">${esc(t.path)} ›</span> ${esc(t.content)}`;
+        } else {
+            div.textContent = t.content;
+        }
+        div.onclick = () => selectTaskPickerItem(prefix, t.id, t.path ? t.path + ' › ' + t.content : t.content);
         list.appendChild(div);
     });
     if (items.length > 30) {

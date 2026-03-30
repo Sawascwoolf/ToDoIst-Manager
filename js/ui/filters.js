@@ -129,7 +129,14 @@ function applyFilters() {
     const priorities = getActiveValues('filter-priority-toggles');
     const assignees = getActiveValues('filter-assignee-toggles');
 
-    const matchesSearch = (t) => !search || t.content.toLowerCase().includes(search) || (t.description || '').toLowerCase().includes(search);
+    const matchesSearch = (t) => {
+        if (!search) return true;
+        if (t.content.toLowerCase().includes(search)) return true;
+        if ((t.description || '').toLowerCase().includes(search)) return true;
+        // Search full hierarchy path
+        const path = getFullPathString(t).toLowerCase();
+        return path.includes(search);
+    };
     const matchesOtherFilters = (t) => {
         if (statuses.length > 0 && statuses.length < 2) {
             const s = (t._status === 'completed' || t.is_completed || t.checked) ? 'completed' : 'open';

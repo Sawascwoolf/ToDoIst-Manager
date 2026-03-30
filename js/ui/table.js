@@ -16,6 +16,31 @@ function fmtDate(s) {
 
 function todoistUrl(taskId) { return `https://todoist.com/app/task/${taskId}`; }
 
+function getTaskPath(taskId) {
+    const parts = [];
+    const map = new Map(); S.allTasks.forEach(t => map.set(t.id, t));
+    let cur = map.get(taskId);
+    while (cur) {
+        const pid = cur.parent_id || cur.parentId;
+        if (!pid) break;
+        const parent = map.get(pid);
+        if (!parent) break;
+        parts.unshift(parent.content);
+        cur = parent;
+    }
+    return parts;
+}
+
+function getTaskPathString(taskId) {
+    return getTaskPath(taskId).join(' › ');
+}
+
+function getFullPathString(task) {
+    const path = getTaskPath(task.id);
+    path.push(task.content);
+    return path.join(' › ');
+}
+
 function getInitials(name) {
     const parts = name.trim().split(/\s+/);
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
@@ -135,6 +160,8 @@ function taskRow(t, today, dimmed) {
         collapseBtn = `<span class="collapse-toggle ${isColl ? 'collapsed' : ''}" onclick="event.stopPropagation();toggleCollapse('${t.id}')">&#9660;</span>`;
     }
 
+    const pathParts = getTaskPath(t.id);
+    const breadcrumb = pathParts.length > 0 ? `<span class="task-breadcrumb">${pathParts.map(p => esc(p)).join(' › ')}</span>` : '';
     const desc = t.description ? `<span class="task-description">${esc(t.description.substring(0, 80))}${t.description.length > 80 ? '...' : ''}</span>` : '';
     const isComp = t._status === 'completed' || t.is_completed || t.checked;
     const statusCb = `<input type="checkbox" class="status-cb" ${isComp ? 'checked' : ''} onchange="toggleTaskStatus('${t.id}',this)" title="${isComp ? 'Unerledigt' : 'Erledigt'}">`;
@@ -147,7 +174,7 @@ function taskRow(t, today, dimmed) {
 
     return `<tr class="${rowClass}" data-id="${t.id}">
         <td class="col-check"><input type="checkbox" ${sel ? 'checked' : ''} onchange="toggleSelect('${t.id}')"></td>
-        <td style="${pad}"><div class="task-content">${collapseBtn}${prefix}<span>${taskLink}</span>${desc}</div></td>
+        <td style="${pad}"><div class="task-content">${breadcrumb}${collapseBtn}${prefix}<span>${taskLink}</span>${desc}</div></td>
         <td class="col-status">${statusCb}</td>
         <td><span class="priority-badge priority-${t.priority}">${PRIO[t.priority] || 'P4'}</span></td>
         <td>${assigneeHtml}</td>
