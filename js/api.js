@@ -28,7 +28,7 @@ async function apiPaginated(path) {
 async function fetchAllCompleted(projectId) {
     let all = [], offset = 0;
     do {
-        const d = await api('GET', `/tasks/completed?projectId=${projectId}&limit=200&offset=${offset}`);
+        const d = await api('GET', `/tasks/completed?project_id=${projectId}&limit=200&offset=${offset}`);
         if (!d) break;
         const items = d.items || d.results || [];
         all = all.concat(items);

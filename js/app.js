@@ -92,9 +92,9 @@ async function loadTasks(force) {
 
     try {
         const [open, completed, secList, collabList] = await Promise.all([
-            apiPaginated(`/tasks?projectId=${pid}`),
+            apiPaginated(`/tasks?project_id=${pid}`),
             fetchAllCompleted(pid),
-            apiPaginated(`/sections?projectId=${pid}`),
+            apiPaginated(`/sections?project_id=${pid}`),
             apiPaginated(`/projects/${pid}/collaborators`).catch(() => []),
         ]);
         open.forEach(t => { t._status = 'open'; });
