@@ -56,12 +56,13 @@ function renderTaskPickerList(prefix, query) {
 
 function selectTaskPickerItem(prefix, id, content) {
     const hidden = document.getElementById(prefix.replace('-list', '').replace('-search', ''));
-    // For new-task-parent picker
-    const parentInput = document.getElementById('new-task-parent');
-    const parentSelected = document.getElementById('new-task-parent-selected');
-    if (prefix === 'new-task-parent' && parentInput) {
-        parentInput.value = id;
-        if (parentSelected) parentSelected.textContent = content;
+    if (prefix === 'new-task-parent') {
+        const parentInput = document.getElementById('new-task-parent');
+        const parentText = document.getElementById('new-task-parent-text');
+        const clearBtn = document.getElementById('new-task-parent-clear');
+        if (parentInput) parentInput.value = id;
+        if (parentText) parentText.textContent = content;
+        if (clearBtn) clearBtn.classList.remove('hidden');
     }
     // For move dialog
     if (prefix === 'move-task') {
@@ -87,6 +88,15 @@ function populateLabelPicker(containerId, selectedLabels) {
 
 function getSelectedLabels(containerId) {
     return [...document.querySelectorAll(`#${containerId} .label-chip.active`)].map(c => c.textContent);
+}
+
+function clearParentPicker() {
+    const input = document.getElementById('new-task-parent');
+    const text = document.getElementById('new-task-parent-text');
+    const clearBtn = document.getElementById('new-task-parent-clear');
+    if (input) input.value = '';
+    if (text) text.textContent = '(Keine – oberste Ebene)';
+    if (clearBtn) clearBtn.classList.add('hidden');
 }
 
 // ── Create Task Dialog ──
@@ -119,14 +129,15 @@ function openCreateTaskDialog(parentId) {
     // Populate parent picker
     populateTaskPicker('new-task-parent');
     const parentInput = document.getElementById('new-task-parent');
-    const parentSelected = document.getElementById('new-task-parent-selected');
+    const parentText = document.getElementById('new-task-parent-text');
+    const clearBtn = document.getElementById('new-task-parent-clear');
     if (parentId && parentInput) {
         parentInput.value = parentId;
         const pt = S.allTasks.find(t => t.id === parentId);
-        if (parentSelected) parentSelected.textContent = pt ? pt.content : parentId;
+        if (parentText) parentText.textContent = pt ? pt.content : parentId;
+        if (clearBtn) clearBtn.classList.remove('hidden');
     } else {
-        if (parentInput) parentInput.value = '';
-        if (parentSelected) parentSelected.textContent = '(Keine – oberste Ebene)';
+        clearParentPicker();
     }
 
     document.getElementById('create-task-dialog').classList.remove('hidden');

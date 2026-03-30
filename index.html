@@ -36,7 +36,7 @@
                 <option value="">Verbinde...</option>
             </select>
             <div id="stats-top" class="stats"></div>
-            <div class="build-badge">Build #34</div>
+            <div class="build-badge">Build #35</div>
         </div>
         <div id="main-error" class="main-error hidden"></div>
 
@@ -244,7 +244,10 @@
                         <div class="task-picker" id="new-task-parent-picker">
                             <input type="text" id="new-task-parent-search" placeholder="Suchen..." oninput="filterTaskPicker('new-task-parent')">
                             <input type="hidden" id="new-task-parent">
-                            <div class="task-picker-selected" id="new-task-parent-selected">(Keine &ndash; oberste Ebene)</div>
+                            <div class="task-picker-selected" id="new-task-parent-selected">
+                                <span id="new-task-parent-text">(Keine &ndash; oberste Ebene)</span>
+                                <button class="task-picker-clear hidden" id="new-task-parent-clear" onclick="clearParentPicker()">&times;</button>
+                            </div>
                             <div class="task-picker-list" id="new-task-parent-list"></div>
                         </div>
                     </div>
