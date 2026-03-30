@@ -83,7 +83,7 @@ function renderTable() {
         gmap.get(sid).tasks.push(t);
     });
 
-    const hasSections = groups.length > 1 || groups[0]?.id !== '__none__';
+    const hasSections = S.groupBySection && (groups.length > 1 || groups[0]?.id !== '__none__');
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
     let html = '';

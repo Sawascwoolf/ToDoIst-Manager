@@ -171,3 +171,75 @@ function sortTasks() {
         return va < vb ? (S.sortAsc ? -1 : 1) : va > vb ? (S.sortAsc ? 1 : -1) : 0;
     });
 }
+
+// ── Grouping Toggle ──
+function toggleGrouping() {
+    S.groupBySection = !S.groupBySection;
+    updateGroupToggleUI();
+    renderTable();
+}
+
+// ── View Configs ──
+let activeViewIdx = -1;
+
+function renderViewSlots() {
+    const container = document.getElementById('view-slots');
+    if (!container) return;
+    const configs = getViewConfigs();
+    container.innerHTML = '';
+    configs.forEach((cfg, i) => {
+        const slot = document.createElement('button');
+        slot.className = 'view-slot' + (i === activeViewIdx ? ' active-view' : '');
+        slot.innerHTML = `${esc(cfg.name)}<span class="view-delete" onclick="event.stopPropagation();deleteView(${i})">&times;</span>`;
+        slot.onclick = () => loadView(i);
+        container.appendChild(slot);
+    });
+}
+
+function saveCurrentView() {
+    const configs = getViewConfigs();
+    if (configs.length >= MAX_VIEWS) {
+        showToast(`Maximal ${MAX_VIEWS} Ansichten.`, 'error');
+        return;
+    }
+    document.getElementById('view-name-input').value = '';
+    document.getElementById('view-name-dialog').classList.remove('hidden');
+    setTimeout(() => document.getElementById('view-name-input').focus(), 100);
+}
+
+function closeViewNameDialog() {
+    document.getElementById('view-name-dialog').classList.add('hidden');
+}
+
+function confirmSaveView() {
+    const name = document.getElementById('view-name-input').value.trim();
+    if (!name) { showToast('Bitte Name eingeben.', 'error'); return; }
+    closeViewNameDialog();
+    const configs = getViewConfigs();
+    const cfg = captureCurrentView();
+    cfg.name = name;
+    configs.push(cfg);
+    saveViewConfigs(configs);
+    activeViewIdx = configs.length - 1;
+    renderViewSlots();
+    showToast(`Ansicht "${name}" gespeichert.`, 'success');
+}
+
+function loadView(idx) {
+    const configs = getViewConfigs();
+    if (!configs[idx]) return;
+    activeViewIdx = idx;
+    restoreView(configs[idx]);
+    renderViewSlots();
+}
+
+function deleteView(idx) {
+    const configs = getViewConfigs();
+    const name = configs[idx]?.name || '';
+    configs.splice(idx, 1);
+    saveViewConfigs(configs);
+    if (activeViewIdx === idx) activeViewIdx = -1;
+    else if (activeViewIdx > idx) activeViewIdx--;
+    renderViewSlots();
+    showToast(`Ansicht "${name}" gelöscht.`, 'success');
+}

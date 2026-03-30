@@ -124,7 +124,10 @@ function showUI() {
 
 // ── Init ──
 document.getElementById('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+document.getElementById('view-name-input').addEventListener('keydown', e => { if (e.key === 'Enter') confirmSaveView(); });
 bindToggleButtons();
+renderViewSlots();
+updateGroupToggleUI();
 
 (function () {
     const t = localStorage.getItem('todoist_token');

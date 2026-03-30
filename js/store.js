@@ -12,7 +12,66 @@ const S = {
     ctxTaskId: null,
     currentProjectId: null,
     undoFn: null,
+    groupBySection: true,
 };
+
+// ── View Configs (5 slots, persisted in localStorage) ──
+const VIEW_STORAGE_KEY = 'todoist_views';
+const MAX_VIEWS = 5;
+
+function getViewConfigs() {
+    try { return JSON.parse(localStorage.getItem(VIEW_STORAGE_KEY)) || []; }
+    catch { return []; }
+}
+
+function saveViewConfigs(configs) {
+    localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(configs.slice(0, MAX_VIEWS)));
+}
+
+function captureCurrentView() {
+    return {
+        search: document.getElementById('filter-search').value,
+        label: document.getElementById('filter-label').value,
+        statuses: getActiveValues('filter-status-toggles'),
+        priorities: getActiveValues('filter-priority-toggles'),
+        assignees: getActiveValues('filter-assignee-toggles'),
+        sortField: S.sortField,
+        sortAsc: S.sortAsc,
+        groupBySection: S.groupBySection,
+    };
+}
+
+function restoreView(cfg) {
+    document.getElementById('filter-search').value = cfg.search || '';
+    document.getElementById('filter-label').value = cfg.label || '';
+
+    setToggles('filter-status-toggles', cfg.statuses);
+    setToggles('filter-priority-toggles', cfg.priorities);
+    setToggles('filter-assignee-toggles', cfg.assignees);
+
+    S.sortField = cfg.sortField || 'content';
+    S.sortAsc = cfg.sortAsc !== false;
+    S.groupBySection = cfg.groupBySection !== false;
+
+    document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
+    const ths = document.querySelectorAll('th.sortable');
+    const idx = ['content', 'priority', 'due', 'assignee'].indexOf(S.sortField);
+    if (idx >= 0 && ths[idx]) ths[idx].classList.add(S.sortAsc ? 'sort-asc' : 'sort-desc');
+
+    updateGroupToggleUI();
+    applyFilters();
+}
+
+function setToggles(containerId, values) {
+    if (!values) return;
+    const btns = document.querySelectorAll(`#${containerId} .toggle-btn:not([data-value="__select_all__"])`);
+    btns.forEach(b => b.classList.toggle('active', values.includes(b.dataset.value)));
+}
+
+function updateGroupToggleUI() {
+    const btn = document.getElementById('group-toggle');
+    if (btn) btn.classList.toggle('active', S.groupBySection);
+}
 
 // ── Cache ──
 const taskCache = {};

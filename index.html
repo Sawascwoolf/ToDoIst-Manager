@@ -36,7 +36,7 @@
                 <option value="">Verbinde...</option>
             </select>
             <div id="stats-top" class="stats"></div>
-            <div class="build-badge">Build #22</div>
+            <div class="build-badge">Build #23</div>
         </div>
         <div id="main-error" class="main-error hidden"></div>
 
@@ -70,6 +70,12 @@
                     <span class="toggle-label">Verantw.</span>
                     <div class="toggle-buttons" id="filter-assignee-toggles"></div>
                 </div>
+            </div>
+            <div class="view-config-row">
+                <div class="view-slots" id="view-slots"></div>
+                <button class="btn-small btn-view-save" onclick="saveCurrentView()" title="Aktuelle Ansicht speichern">+ Ansicht</button>
+                <div class="view-spacer"></div>
+                <button class="toggle-btn active" id="group-toggle" onclick="toggleGrouping()">Gruppierung</button>
             </div>
             <div class="action-row">
                 <div class="selection-info">
@@ -161,6 +167,18 @@
             <button onclick="ctxAction('openTodoist')">In Todoist &ouml;ffnen</button>
             <div class="ctx-separator"></div>
             <button class="ctx-danger" onclick="ctxAction('delete')">L&ouml;schen</button>
+        </div>
+
+        <!-- View Name Dialog -->
+        <div id="view-name-dialog" class="modal-overlay hidden" onclick="if(event.target===this)closeViewNameDialog()">
+            <div class="modal-card">
+                <h3>Ansicht speichern</h3>
+                <input type="text" id="view-name-input" placeholder="Name der Ansicht..." maxlength="20">
+                <div class="modal-actions">
+                    <button class="btn-small" onclick="closeViewNameDialog()">Abbrechen</button>
+                    <button class="btn-small btn-success" onclick="confirmSaveView()">Speichern</button>
+                </div>
+            </div>
         </div>
 
         <!-- Due Date Dialog -->

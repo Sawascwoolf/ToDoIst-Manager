@@ -77,6 +77,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .toggle-btn.meta-btn { font-style: italic; }
 .toggle-btn.meta-btn.active { background: #666; border-color: #666; }
 
+/* ── View Config Row ── */
+.view-config-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid #eee; margin-bottom: 2px; }
+.view-slots { display: flex; gap: 4px; flex-wrap: wrap; }
+.view-slot { position: relative; display: inline-flex; align-items: center; gap: 2px; padding: 3px 8px; font-size: 0.75rem; font-weight: 600; border: 1px solid var(--border); border-radius: 3px; background: #fff; cursor: pointer; white-space: nowrap; transition: all 0.12s; }
+.view-slot:hover { border-color: #aaa; background: #f8f8f8; }
+.view-slot.active-view { background: var(--primary); color: #fff; border-color: var(--primary); }
+.view-slot .view-delete { font-size: 0.65rem; margin-left: 4px; opacity: 0.5; padding: 0 2px; }
+.view-slot .view-delete:hover { opacity: 1; }
+.btn-view-save { font-size: 0.72rem !important; padding: 3px 8px !important; color: var(--success) !important; border-color: var(--success) !important; }
+.btn-view-save:hover { background: var(--success) !important; color: #fff !important; }
+.view-spacer { flex: 1; }
+#group-toggle { font-size: 0.72rem; padding: 3px 8px; }
+
 /* ── Action Row ── */
 .action-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid #eee; }
 .selection-info { display: flex; align-items: center; gap: 8px; }
