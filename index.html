@@ -36,7 +36,7 @@
                 <option value="">Verbinde...</option>
             </select>
             <div id="stats-top" class="stats"></div>
-            <div class="build-badge">Build #23</div>
+            <div class="build-badge">Build #24</div>
         </div>
         <div id="main-error" class="main-error hidden"></div>
 
@@ -88,9 +88,27 @@
                 <div class="list-menu-wrapper" id="list-menu-wrapper">
                     <button class="actions-btn list-actions-btn" onclick="showListMenu(event)" title="Aktionen">&#8943;</button>
                     <div id="list-menu" class="context-menu hidden">
-                        <button onclick="listMenuAction('reopenSelected')">Auswahl: Als unerledigt</button>
-                        <button onclick="listMenuAction('completeSelected')">Auswahl: Als erledigt</button>
-                        <div class="ctx-separator"></div>
+                        <button class="bulk-only" onclick="listMenuAction('reopenSelected')">Auswahl: Als unerledigt</button>
+                        <button class="bulk-only" onclick="listMenuAction('completeSelected')">Auswahl: Als erledigt</button>
+                        <div class="ctx-separator bulk-only"></div>
+                        <div class="ctx-submenu-wrap bulk-only" id="bulk-priority-wrap">
+                            <button class="ctx-has-sub">Auswahl: Priorit&auml;t &#9656;</button>
+                            <div class="ctx-submenu" id="bulk-priority-sub">
+                                <button onclick="bulkSetPriority(4)"><span class="priority-dot p1-dot"></span> P1</button>
+                                <button onclick="bulkSetPriority(3)"><span class="priority-dot p2-dot"></span> P2</button>
+                                <button onclick="bulkSetPriority(2)"><span class="priority-dot p3-dot"></span> P3</button>
+                                <button onclick="bulkSetPriority(1)"><span class="priority-dot p4-dot"></span> P4</button>
+                            </div>
+                        </div>
+                        <div class="ctx-submenu-wrap bulk-only" id="bulk-assignee-wrap">
+                            <button class="ctx-has-sub">Auswahl: Verantwortlicher &#9656;</button>
+                            <div class="ctx-submenu" id="bulk-assignee-sub"></div>
+                        </div>
+                        <div class="ctx-submenu-wrap bulk-only" id="bulk-label-wrap">
+                            <button class="ctx-has-sub">Auswahl: Label hinzuf&uuml;gen &#9656;</button>
+                            <div class="ctx-submenu" id="bulk-label-sub"></div>
+                        </div>
+                        <div class="ctx-separator bulk-only"></div>
                         <button onclick="listMenuAction('expandAll')">Alle aufklappen</button>
                         <button onclick="listMenuAction('collapseAll')">Alle zuklappen</button>
                         <div class="ctx-separator"></div>

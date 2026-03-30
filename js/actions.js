@@ -193,3 +193,68 @@ async function completeSelected() {
     S.selectedIds.clear();
     applyFilters();
 }
+
+// ── Bulk: Priority ──
+async function bulkSetPriority(prio) {
+    hideListMenu();
+    if (!S.selectedIds.size) return;
+    const ids = [...S.selectedIds];
+    const oldPrios = {};
+    ids.forEach(id => { const t = S.allTasks.find(x => x.id === id); if (t) oldPrios[id] = t.priority; });
+    const { completed, failed } = await parallelLimit(
+        ids.map(id => () => api('POST', `/tasks/${id}`, { priority: prio })), 5,
+        (d, t) => showProgress(d, t, 'Priorität'));
+    hideProgress();
+    ids.forEach(id => { const t = S.allTasks.find(x => x.id === id); if (t) t.priority = prio; });
+    invalidateCache(S.currentProjectId);
+    showToast(`${completed} → ${PRIO[prio]}`, failed ? 'error' : 'success', !failed ? async () => {
+        await parallelLimit(ids.map(id => () => api('POST', `/tasks/${id}`, { priority: oldPrios[id] || 1 })), 5);
+        ids.forEach(id => { const t = S.allTasks.find(x => x.id === id); if (t) t.priority = oldPrios[id] || 1; });
+        invalidateCache(S.currentProjectId);
+        applyFilters();
+    } : null);
+    S.selectedIds.clear();
+    applyFilters();
+}
+
+// ── Bulk: Assignee ──
+async function bulkSetAssignee(uid) {
+    hideListMenu();
+    if (!S.selectedIds.size) return;
+    const ids = [...S.selectedIds];
+    const body = uid ? { responsible_uid: uid } : { responsible_uid: null };
+    const { completed, failed } = await parallelLimit(
+        ids.map(id => () => api('POST', `/tasks/${id}`, body)), 5,
+        (d, t) => showProgress(d, t, 'Verantwortlich'));
+    hideProgress();
+    ids.forEach(id => {
+        const t = S.allTasks.find(x => x.id === id);
+        if (t) { t.responsible_uid = uid; t.responsibleUid = uid; t.assignee_id = uid; }
+    });
+    invalidateCache(S.currentProjectId);
+    const name = uid ? (S.collaborators[uid] || uid) : 'Niemand';
+    showToast(`${completed} → ${name}`, failed ? 'error' : 'success');
+    S.selectedIds.clear();
+    applyFilters();
+}
+
+// ── Bulk: Add Label ──
+async function bulkAddLabel(label) {
+    hideListMenu();
+    if (!label || !label.trim() || !S.selectedIds.size) return;
+    label = label.trim();
+    const ids = [...S.selectedIds];
+    const { completed, failed } = await parallelLimit(
+        ids.map(id => () => {
+            const t = S.allTasks.find(x => x.id === id);
+            if (!t) return Promise.resolve();
+            const newLabels = [...new Set([...(t.labels || []), label])];
+            return api('POST', `/tasks/${id}`, { labels: newLabels }).then(() => { t.labels = newLabels; });
+        }), 5,
+        (d, t) => showProgress(d, t, 'Label'));
+    hideProgress();
+    invalidateCache(S.currentProjectId);
+    showToast(`${completed} → Label "${label}"`, failed ? 'error' : 'success');
+    S.selectedIds.clear();
+    applyFilters();
+}

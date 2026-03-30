@@ -16,6 +16,12 @@ function fmtDate(s) {
 
 function todoistUrl(taskId) { return `https://todoist.com/app/task/${taskId}`; }
 
+function getInitials(name) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return name.substring(0, 2).toUpperCase();
+}
+
 function mk(tag, cls, text) {
     const el = document.createElement(tag);
     if (cls) el.className = cls;
@@ -73,7 +79,8 @@ function renderTable() {
     const tbody = document.getElementById('task-body');
     const noTasks = document.getElementById('no-tasks');
 
-    if (S.filteredTasks.length === 0) { tbody.innerHTML = ''; noTasks.classList.remove('hidden'); return; }
+    const allEmpty = S.filteredTasks.length === 0 && (!S.searchExtraTasks || S.searchExtraTasks.length === 0);
+    if (allEmpty) { tbody.innerHTML = ''; noTasks.classList.remove('hidden'); return; }
     noTasks.classList.add('hidden');
 
     const groups = []; const gmap = new Map();
@@ -90,23 +97,30 @@ function renderTable() {
 
     groups.forEach(g => {
         const secKey = 'sec_' + g.id;
-        const secCollapsed = S.collapsedIds.has(secKey);
+        const secCollapsed = hasSections && S.collapsedIds.has(secKey);
         if (hasSections) {
             html += `<tr class="section-row ${secCollapsed ? 'collapsed' : ''}" onclick="toggleCollapse('${secKey}')">
                 <td colspan="8"><span class="section-toggle">&#9660;</span> ${esc(g.name)} <span class="section-count">(${g.tasks.length})</span></td></tr>`;
         }
         if (!secCollapsed) {
             g.tasks.forEach(t => {
-                if (isHiddenByCollapse(t)) return;
+                if (hasSections && isHiddenByCollapse(t)) return;
                 html += taskRow(t, today);
             });
         }
     });
 
+    // Search-extra results (match search but excluded by other filters)
+    if (S.searchExtraTasks && S.searchExtraTasks.length > 0) {
+        html += `<tr class="section-row search-extra-row">
+            <td colspan="8"><span class="search-extra-label">Weitere Suchtreffer (durch Filter ausgeblendet)</span> <span class="section-count">(${S.searchExtraTasks.length})</span></td></tr>`;
+        S.searchExtraTasks.forEach(t => { html += taskRow(t, today, true); });
+    }
+
     tbody.innerHTML = html;
 }
 
-function taskRow(t, today) {
+function taskRow(t, today, dimmed) {
     const sel = S.selectedIds.has(t.id);
     const depth = t._depth || 0;
     const pad = depth > 0 ? `padding-left:${depth * 20 + 10}px` : '';
@@ -130,15 +144,17 @@ function taskRow(t, today) {
 
     const labels = (t.labels || []).map(l => `<span class="label-tag">${esc(l)}</span>`).join('');
     const assignee = getAssignee(t);
+    const assigneeHtml = assignee ? `<span class="assignee-avatar" title="${esc(assignee)}">${getInitials(assignee)}</span>` : '—';
     const taskLink = `<a href="${todoistUrl(t.id)}" target="_blank" rel="noopener" class="task-link" title="In Todoist öffnen">${esc(t.content)}</a>`;
+    const rowClass = (sel ? 'selected' : '') + (dimmed ? ' dimmed' : '');
 
-    return `<tr class="${sel ? 'selected' : ''}" data-id="${t.id}">
+    return `<tr class="${rowClass}" data-id="${t.id}">
         <td class="col-check"><input type="checkbox" ${sel ? 'checked' : ''} onchange="toggleSelect('${t.id}')"></td>
         <td style="${pad}"><div class="task-content">${collapseBtn}${prefix}<span>${taskLink}</span>${desc}</div></td>
         <td class="col-status">${statusCb}</td>
         <td><span class="priority-badge priority-${t.priority}">${PRIO[t.priority] || 'P4'}</span></td>
         <td>${dueHtml || '—'}</td>
-        <td>${assignee ? esc(assignee) : '—'}</td>
+        <td>${assigneeHtml}</td>
         <td>${labels || '—'}</td>
         <td class="col-actions"><button class="actions-btn" onclick="showCtxMenu(event,'${t.id}')">&#8943;</button></td>
     </tr>`;

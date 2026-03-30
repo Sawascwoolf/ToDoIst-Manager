@@ -13,6 +13,7 @@ const S = {
     currentProjectId: null,
     undoFn: null,
     groupBySection: true,
+    searchExtraTasks: [],
 };
 
 // ── View Configs (5 slots, persisted in localStorage) ──

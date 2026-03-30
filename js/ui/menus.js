@@ -68,15 +68,40 @@ function showListMenu(e) {
     const menu = document.getElementById('list-menu');
     if (!menu) return;
     const hasSel = S.selectedIds.size > 0;
-    menu.querySelectorAll('button').forEach(b => {
-        if (b.textContent.startsWith('Auswahl:')) b.style.display = hasSel ? '' : 'none';
-    });
-    const seps = menu.querySelectorAll('.ctx-separator');
-    if (seps[0]) seps[0].style.display = hasSel ? '' : 'none';
+
+    // Show/hide bulk-only items
+    menu.querySelectorAll('.bulk-only').forEach(el => el.style.display = hasSel ? '' : 'none');
+
+    // Populate bulk assignee submenu
+    const bulkAssigneeSub = document.getElementById('bulk-assignee-sub');
+    if (bulkAssigneeSub && hasSel) {
+        bulkAssigneeSub.innerHTML = '<button onclick="bulkSetAssignee(null)">Niemand</button>';
+        Object.entries(S.collaborators).forEach(([uid, name]) => {
+            bulkAssigneeSub.innerHTML += `<button onclick="bulkSetAssignee('${uid}')">${esc(name)}</button>`;
+        });
+    }
+
+    // Populate bulk label submenu
+    const bulkLabelSub = document.getElementById('bulk-label-sub');
+    if (bulkLabelSub && hasSel) {
+        const allLabels = new Set();
+        S.allTasks.forEach(t => (t.labels || []).forEach(l => allLabels.add(l)));
+        bulkLabelSub.innerHTML = '';
+        [...allLabels].sort().forEach(l => {
+            bulkLabelSub.innerHTML += `<button onclick="bulkAddLabel('${esc(l)}')">${esc(l)}</button>`;
+        });
+        bulkLabelSub.innerHTML += `<div class="ctx-separator"></div><div class="ctx-input-row"><input type="text" id="bulk-new-label" placeholder="Neues Label..." onkeydown="if(event.key==='Enter'){bulkAddLabel(this.value);event.stopPropagation()}"><button onclick="bulkAddLabel(document.getElementById('bulk-new-label').value)">+</button></div>`;
+    }
+
     menu.classList.remove('hidden');
     const rect = e.currentTarget.getBoundingClientRect();
+    const left = Math.min(rect.right - 200, window.innerWidth - 220);
     menu.style.top = rect.bottom + 4 + 'px';
-    menu.style.left = Math.min(rect.right - 200, window.innerWidth - 220) + 'px';
+    menu.style.left = left + 'px';
+
+    // Flip submenus left if needed
+    const openLeft = left + 200 + 140 > window.innerWidth;
+    menu.querySelectorAll('.ctx-submenu').forEach(s => s.classList.toggle('open-left', openLeft));
 }
 
 function hideListMenu() { const m = document.getElementById('list-menu'); if (m) m.classList.add('hidden'); }

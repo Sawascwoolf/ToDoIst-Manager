@@ -141,7 +141,7 @@ tbody td { padding: 6px 10px; font-size: 0.85rem; vertical-align: middle; }
 .col-status { width: 36px; text-align: center; }
 .col-priority { width: 50px; }
 .col-due { width: 90px; }
-.col-assignee { width: 110px; }
+.col-assignee { width: 44px; text-align: center; }
 .col-labels { width: 130px; }
 .col-actions { width: 36px; text-align: center; }
 
@@ -161,6 +161,15 @@ tbody td { padding: 6px 10px; font-size: 0.85rem; vertical-align: middle; }
 .task-link:hover { color: var(--primary); text-decoration: underline; }
 .task-description { font-size: 0.75rem; color: var(--text-muted); margin-top: 1px; }
 .subtask-indicator { color: var(--text-muted); font-size: 0.8rem; }
+
+/* Assignee avatar */
+.assignee-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #e0e0e0; color: #555; font-size: 0.65rem; font-weight: 700; cursor: default; }
+
+/* Dimmed rows (search extras) */
+tr.dimmed { opacity: 0.5; }
+tr.dimmed:hover { opacity: 0.75; }
+.search-extra-row td { padding: 6px 10px; font-weight: 600; font-size: 0.8rem; background: #fff8e1; border-bottom: 1px solid #ffe082; cursor: default; user-select: none; color: #a68200; }
+.search-extra-label { font-style: italic; }
 
 /* Status checkbox */
 .status-cb { width: 16px; height: 16px; cursor: pointer; accent-color: var(--success); }

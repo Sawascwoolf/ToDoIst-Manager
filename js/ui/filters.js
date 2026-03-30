@@ -121,8 +121,8 @@ function applyFilters() {
     const priorities = getActiveValues('filter-priority-toggles');
     const assignees = getActiveValues('filter-assignee-toggles');
 
-    S.filteredTasks = S.allTasks.filter(t => {
-        if (search && !t.content.toLowerCase().includes(search) && !(t.description || '').toLowerCase().includes(search)) return false;
+    const matchesSearch = (t) => !search || t.content.toLowerCase().includes(search) || (t.description || '').toLowerCase().includes(search);
+    const matchesOtherFilters = (t) => {
         if (statuses.length > 0 && statuses.length < 2) {
             const s = (t._status === 'completed' || t.is_completed || t.checked) ? 'completed' : 'open';
             if (!statuses.includes(s)) return false;
@@ -137,7 +137,16 @@ function applyFilters() {
             if (uid && !assignees.includes(uid)) return false;
         }
         return true;
-    });
+    };
+
+    S.filteredTasks = S.allTasks.filter(t => matchesSearch(t) && matchesOtherFilters(t));
+
+    // Collect search matches excluded by other filters
+    S.searchExtraTasks = [];
+    if (search) {
+        const filteredIds = new Set(S.filteredTasks.map(t => t.id));
+        S.searchExtraTasks = S.allTasks.filter(t => matchesSearch(t) && !matchesOtherFilters(t) && !filteredIds.has(t.id));
+    }
 
     sortTasks();
     S.filteredTasks = buildHierarchy(S.filteredTasks);
