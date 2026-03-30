@@ -166,7 +166,7 @@ function sortBy(field) {
     if (S.sortField === field) S.sortAsc = !S.sortAsc; else { S.sortField = field; S.sortAsc = true; }
     document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
     const ths = document.querySelectorAll('th.sortable');
-    const idx = ['content', 'priority', 'due', 'assignee'].indexOf(field);
+    const idx = ['content', 'priority', 'assignee'].indexOf(field);
     if (idx >= 0 && ths[idx]) ths[idx].classList.add(S.sortAsc ? 'sort-asc' : 'sort-desc');
     sortTasks();
     if (S.showHierarchy) S.filteredTasks = buildHierarchy(S.filteredTasks);

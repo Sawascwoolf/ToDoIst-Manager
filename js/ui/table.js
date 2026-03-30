@@ -103,7 +103,7 @@ function renderTable() {
         const secCollapsed = hasSections && S.collapsedIds.has(secKey);
         if (hasSections) {
             html += `<tr class="section-row ${secCollapsed ? 'collapsed' : ''}" onclick="toggleCollapse('${secKey}')">
-                <td colspan="8"><span class="section-toggle">&#9660;</span> ${esc(g.name)} <span class="section-count">(${g.tasks.length})</span></td></tr>`;
+                <td colspan="7"><span class="section-toggle">&#9660;</span> ${esc(g.name)} <span class="section-count">(${g.tasks.length})</span></td></tr>`;
         }
         if (!secCollapsed) {
             g.tasks.forEach(t => {
@@ -116,7 +116,7 @@ function renderTable() {
     // Search-extra results (match search but excluded by other filters)
     if (S.searchExtraTasks && S.searchExtraTasks.length > 0) {
         html += `<tr class="section-row search-extra-row">
-            <td colspan="8"><span class="search-extra-label">Weitere Suchtreffer (durch Filter ausgeblendet)</span> <span class="section-count">(${S.searchExtraTasks.length})</span></td></tr>`;
+            <td colspan="7"><span class="search-extra-label">Weitere Suchtreffer (durch Filter ausgeblendet)</span> <span class="section-count">(${S.searchExtraTasks.length})</span></td></tr>`;
         S.searchExtraTasks.forEach(t => { html += taskRow(t, today, true); });
     }
 
@@ -139,12 +139,6 @@ function taskRow(t, today, dimmed) {
     const isComp = t._status === 'completed' || t.is_completed || t.checked;
     const statusCb = `<input type="checkbox" class="status-cb" ${isComp ? 'checked' : ''} onchange="toggleTaskStatus('${t.id}',this)" title="${isComp ? 'Unerledigt' : 'Erledigt'}">`;
 
-    let dueHtml = '';
-    if (t.due) {
-        const d = new Date(t.due.date), ov = d < today;
-        dueHtml = `<span class="due-date${ov ? ' overdue' : ''}">${fmtDate(t.due.date)}${ov ? ' !' : ''}</span>`;
-    }
-
     const labels = (t.labels || []).map(l => `<span class="label-tag">${esc(l)}</span>`).join('');
     const assignee = getAssignee(t);
     const assigneeHtml = assignee ? `<span class="assignee-avatar" title="${esc(assignee)}">${getInitials(assignee)}</span>` : '—';
@@ -156,7 +150,6 @@ function taskRow(t, today, dimmed) {
         <td style="${pad}"><div class="task-content">${collapseBtn}${prefix}<span>${taskLink}</span>${desc}</div></td>
         <td class="col-status">${statusCb}</td>
         <td><span class="priority-badge priority-${t.priority}">${PRIO[t.priority] || 'P4'}</span></td>
-        <td>${dueHtml || '—'}</td>
         <td>${assigneeHtml}</td>
         <td>${labels || '—'}</td>
         <td class="col-actions"><button class="actions-btn" onclick="showCtxMenu(event,'${t.id}')">&#8943;</button></td>

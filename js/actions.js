@@ -73,12 +73,26 @@ async function ctxAction(action, value) {
                 invalidateCache(S.currentProjectId);
                 applyFilters();
             });
-        } else if (action === 'editDue') {
-            const input = document.getElementById('due-date-input');
-            input.value = task && task.due ? task.due.date : '';
-            const dlg = document.getElementById('due-dialog');
-            dlg._taskId = id;
-            dlg.classList.remove('hidden');
+        } else if (action === 'moveToParent') {
+            const oldParent = task ? (task.parent_id || task.parentId || null) : null;
+            await api('POST', `/tasks/${id}`, { parent_id: value || null });
+            if (task) { task.parent_id = value; task.parentId = value; }
+            invalidateCache(S.currentProjectId);
+            await loadTasks(true);
+            const targetName = value ? (S.allTasks.find(t => t.id === value)?.content || value) : 'Oberste Ebene';
+            showToast(`Verschoben → ${targetName}`, 'success');
+            return;
+        } else if (action === 'confirmDelete') {
+            if (!task) return;
+            showConfirmDialog('Aufgabe löschen', `"${task.content}" wirklich löschen?`, 'Löschen', async () => {
+                try {
+                    await api('DELETE', `/tasks/${id}`);
+                    S.allTasks = S.allTasks.filter(t => t.id !== id);
+                    invalidateCache(S.currentProjectId);
+                    showToast('Aufgabe gelöscht.', 'success');
+                    applyFilters();
+                } catch (e) { showToast('Fehler: ' + e.message, 'error'); }
+            });
             return;
         } else if (action === 'duplicate') {
             if (!task) return;
@@ -92,11 +106,6 @@ async function ctxAction(action, value) {
             invalidateCache(S.currentProjectId);
             await loadTasks(true);
             showToast('Aufgabe dupliziert.', 'success');
-        } else if (action === 'delete') {
-            await api('DELETE', `/tasks/${id}`);
-            S.allTasks = S.allTasks.filter(t => t.id !== id);
-            invalidateCache(S.currentProjectId);
-            showToast('Aufgabe gelöscht.', 'success');
         } else if (action === 'openTodoist') {
             window.open(todoistUrl(id), '_blank');
             return;

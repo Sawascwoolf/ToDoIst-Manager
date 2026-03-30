@@ -135,6 +135,7 @@ function showUI() {
 // ── Init ──
 document.getElementById('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
 document.getElementById('view-name-input').addEventListener('keydown', e => { if (e.key === 'Enter') confirmSaveView(); });
+document.getElementById('new-task-content').addEventListener('keydown', e => { if (e.key === 'Enter') confirmCreateTask(); });
 bindToggleButtons();
 renderViewSlots();
 updateGroupToggleUI();

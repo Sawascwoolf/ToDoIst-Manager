@@ -46,6 +46,21 @@ function showCtxMenu(e, taskId) {
         addLabelSub.innerHTML += `<div class="ctx-input-row"><input type="text" id="ctx-new-label" placeholder="Neues Label..." onkeydown="if(event.key==='Enter'){ctxAction('addLabel',this.value);event.stopPropagation()}"><button onclick="ctxAction('addLabel',document.getElementById('ctx-new-label').value)">+</button></div>`;
     }
 
+    // Populate "Verschieben" submenu (move to different parent)
+    const parentSub = document.getElementById('ctx-parent-sub');
+    if (parentSub && task) {
+        const curParent = task.parent_id || task.parentId || null;
+        parentSub.innerHTML = '';
+        if (curParent) {
+            parentSub.innerHTML += `<button onclick="ctxAction('moveToParent',null)"><b>↑ Oberste Ebene</b></button><div class="ctx-separator"></div>`;
+        }
+        S.allTasks.filter(t => t.id !== taskId && t._status !== 'completed' && t.id !== curParent).slice(0, 20).forEach(t => {
+            const depth = t._depth || 0;
+            const pre = depth > 0 ? '  '.repeat(depth) + '└ ' : '';
+            parentSub.innerHTML += `<button onclick="ctxAction('moveToParent','${t.id}')">${esc(pre + t.content.substring(0, 40))}</button>`;
+        });
+    }
+
     menu.classList.remove('hidden');
     const rect = e.currentTarget.getBoundingClientRect();
     const menuH = menu.offsetHeight || 380;

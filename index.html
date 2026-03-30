@@ -36,7 +36,7 @@
                 <option value="">Verbinde...</option>
             </select>
             <div id="stats-top" class="stats"></div>
-            <div class="build-badge">Build #29</div>
+            <div class="build-badge">Build #30</div>
         </div>
         <div id="main-error" class="main-error hidden"></div>
 
@@ -86,6 +86,7 @@
                     </label>
                     <span id="selection-count"></span>
                 </div>
+                <button class="btn-create-task" onclick="openCreateTaskDialog()">+ Aufgabe</button>
                 <div class="list-menu-wrapper" id="list-menu-wrapper">
                     <button class="actions-btn list-actions-btn" onclick="showListMenu(event)" title="Aktionen">&#8943;</button>
                     <div id="list-menu" class="context-menu hidden">
@@ -141,7 +142,6 @@
                             <th class="col-task sortable" onclick="sortBy('content')">Aufgabe <span class="sort-icon"></span></th>
                             <th class="col-status">Status</th>
                             <th class="col-priority sortable" onclick="sortBy('priority')">Prio <span class="sort-icon"></span></th>
-                            <th class="col-due sortable" onclick="sortBy('due')">F&auml;llig <span class="sort-icon"></span></th>
                             <th class="col-assignee sortable" onclick="sortBy('assignee')">Verantw. <span class="sort-icon"></span></th>
                             <th class="col-labels">Labels</th>
                             <th class="col-actions"></th>
@@ -180,12 +180,15 @@
                 <button class="ctx-has-sub">Label hinzuf&uuml;gen &#9656;</button>
                 <div class="ctx-submenu" id="ctx-addlabel-sub"></div>
             </div>
-            <button onclick="ctxAction('editDue')">F&auml;lligkeitsdatum &auml;ndern</button>
             <div class="ctx-separator"></div>
+            <div class="ctx-submenu-wrap" id="ctx-parent-wrap">
+                <button class="ctx-has-sub">Verschieben &#9656;</button>
+                <div class="ctx-submenu" id="ctx-parent-sub"></div>
+            </div>
             <button onclick="ctxAction('duplicate')">Duplizieren</button>
             <button onclick="ctxAction('openTodoist')">In Todoist &ouml;ffnen</button>
             <div class="ctx-separator"></div>
-            <button class="ctx-danger" onclick="ctxAction('delete')">L&ouml;schen</button>
+            <button class="ctx-danger" onclick="ctxAction('confirmDelete')">L&ouml;schen</button>
         </div>
 
         <!-- View Name Dialog -->
@@ -200,15 +203,41 @@
             </div>
         </div>
 
-        <!-- Due Date Dialog -->
-        <div id="due-dialog" class="modal-overlay hidden" onclick="if(event.target===this)closeDueDialog()">
+        <!-- Confirm Dialog -->
+        <div id="confirm-dialog" class="modal-overlay hidden" onclick="if(event.target===this)closeConfirmDialog(false)">
             <div class="modal-card">
-                <h3>F&auml;lligkeitsdatum</h3>
-                <input type="date" id="due-date-input">
+                <h3 id="confirm-title">Best&auml;tigen</h3>
+                <p id="confirm-message"></p>
                 <div class="modal-actions">
-                    <button class="btn-small" onclick="closeDueDialog()">Abbrechen</button>
-                    <button class="btn-small btn-danger" onclick="saveDueDate(null)">Entfernen</button>
-                    <button class="btn-small btn-success" onclick="saveDueDate(document.getElementById('due-date-input').value)">Speichern</button>
+                    <button class="btn-small" onclick="closeConfirmDialog(false)">Abbrechen</button>
+                    <button class="btn-small btn-danger" id="confirm-ok" onclick="closeConfirmDialog(true)">L&ouml;schen</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create Task Dialog -->
+        <div id="create-task-dialog" class="modal-overlay hidden" onclick="if(event.target===this)closeCreateTaskDialog()">
+            <div class="modal-card modal-card-wide">
+                <h3>Neue Aufgabe</h3>
+                <input type="text" id="new-task-content" placeholder="Aufgabenname..." autofocus>
+                <div class="create-task-options">
+                    <div class="create-task-row">
+                        <label>Priorit&auml;t</label>
+                        <select id="new-task-priority">
+                            <option value="1">P4</option>
+                            <option value="2">P3</option>
+                            <option value="3">P2</option>
+                            <option value="4">P1</option>
+                        </select>
+                    </div>
+                    <div class="create-task-row">
+                        <label>&Uuml;bergeordnet</label>
+                        <select id="new-task-parent"></select>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-small" onclick="closeCreateTaskDialog()">Abbrechen</button>
+                    <button class="btn-small btn-success" onclick="confirmCreateTask()">Erstellen</button>
                 </div>
             </div>
         </div>
