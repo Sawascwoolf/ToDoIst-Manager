@@ -24,7 +24,7 @@
                 <p id="auth-error" class="error hidden"></p>
             </div>
         </div>
-        <div class="sidebar-footer">Build #13</div>
+        <div class="sidebar-footer"></div>
     </aside>
     <div id="sidebar-overlay" class="sidebar-overlay hidden" onclick="toggleSidebar()"></div>
 
@@ -36,6 +36,7 @@
                 <option value="">Verbinde...</option>
             </select>
             <div id="stats-top" class="stats"></div>
+            <div class="build-badge">Build #29</div>
         </div>
         <div id="main-error" class="main-error hidden"></div>
 
@@ -46,6 +47,7 @@
                 <select id="filter-label" onchange="applyFilters()">
                     <option value="">Label: Alle</option>
                 </select>
+                <button class="btn-reset-all" onclick="resetAllFilters()">Alle Aufgaben</button>
             </div>
             <div class="toggle-filters">
                 <div class="toggle-group">
@@ -69,6 +71,13 @@
                     <div class="toggle-buttons" id="filter-assignee-toggles"></div>
                 </div>
             </div>
+            <div class="view-config-row">
+                <div class="view-slots" id="view-slots"></div>
+                <button class="btn-small btn-view-save" onclick="saveCurrentView()" title="Aktuelle Ansicht speichern">+ Ansicht</button>
+                <div class="view-spacer"></div>
+                <button class="group-toggle-btn active" id="group-toggle" style="display:none">Sektionen</button>
+                <button class="group-toggle-btn active" id="hierarchy-toggle">Hierarchie</button>
+            </div>
             <div class="action-row">
                 <div class="selection-info">
                     <label class="checkbox-label">
@@ -77,13 +86,35 @@
                     </label>
                     <span id="selection-count"></span>
                 </div>
-                <div class="bulk-actions" id="bulk-actions" style="display:none">
-                    <button class="btn-small btn-danger" onclick="reopenSelected()">Unerledigt</button>
-                    <button class="btn-small btn-success" onclick="completeSelected()">Erledigt</button>
-                </div>
-                <div class="section-controls" id="section-controls" style="display:none">
-                    <button class="btn-small" onclick="expandAll()">Aufklappen</button>
-                    <button class="btn-small" onclick="collapseAll()">Zuklappen</button>
+                <div class="list-menu-wrapper" id="list-menu-wrapper">
+                    <button class="actions-btn list-actions-btn" onclick="showListMenu(event)" title="Aktionen">&#8943;</button>
+                    <div id="list-menu" class="context-menu hidden">
+                        <button class="bulk-only" onclick="listMenuAction('reopenSelected')">Auswahl: Als unerledigt</button>
+                        <button class="bulk-only" onclick="listMenuAction('completeSelected')">Auswahl: Als erledigt</button>
+                        <div class="ctx-separator bulk-only"></div>
+                        <div class="ctx-submenu-wrap bulk-only" id="bulk-priority-wrap">
+                            <button class="ctx-has-sub">Auswahl: Priorit&auml;t &#9656;</button>
+                            <div class="ctx-submenu" id="bulk-priority-sub">
+                                <button onclick="bulkSetPriority(4)"><span class="priority-dot p1-dot"></span> P1</button>
+                                <button onclick="bulkSetPriority(3)"><span class="priority-dot p2-dot"></span> P2</button>
+                                <button onclick="bulkSetPriority(2)"><span class="priority-dot p3-dot"></span> P3</button>
+                                <button onclick="bulkSetPriority(1)"><span class="priority-dot p4-dot"></span> P4</button>
+                            </div>
+                        </div>
+                        <div class="ctx-submenu-wrap bulk-only" id="bulk-assignee-wrap">
+                            <button class="ctx-has-sub">Auswahl: Verantwortlicher &#9656;</button>
+                            <div class="ctx-submenu" id="bulk-assignee-sub"></div>
+                        </div>
+                        <div class="ctx-submenu-wrap bulk-only" id="bulk-label-wrap">
+                            <button class="ctx-has-sub">Auswahl: Label hinzuf&uuml;gen &#9656;</button>
+                            <div class="ctx-submenu" id="bulk-label-sub"></div>
+                        </div>
+                        <div class="ctx-separator bulk-only"></div>
+                        <button onclick="listMenuAction('expandAll')">Alle aufklappen</button>
+                        <button onclick="listMenuAction('collapseAll')">Alle zuklappen</button>
+                        <div class="ctx-separator"></div>
+                        <button onclick="listMenuAction('refresh')">Neu laden</button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -125,14 +156,78 @@
 
         <!-- Context Menu -->
         <div id="context-menu" class="context-menu hidden">
-            <button onclick="ctxAction('reopen')">Als unerledigt markieren</button>
             <button onclick="ctxAction('complete')">Als erledigt markieren</button>
+            <button onclick="ctxAction('reopen')">Als unerledigt markieren</button>
+            <div class="ctx-separator"></div>
+            <div class="ctx-submenu-wrap" id="ctx-priority-wrap">
+                <button class="ctx-has-sub">Priorit&auml;t &auml;ndern &#9656;</button>
+                <div class="ctx-submenu" id="ctx-priority-sub">
+                    <button onclick="ctxAction('priority',4)"><span class="priority-dot p1-dot"></span> P1</button>
+                    <button onclick="ctxAction('priority',3)"><span class="priority-dot p2-dot"></span> P2</button>
+                    <button onclick="ctxAction('priority',2)"><span class="priority-dot p3-dot"></span> P3</button>
+                    <button onclick="ctxAction('priority',1)"><span class="priority-dot p4-dot"></span> P4</button>
+                </div>
+            </div>
+            <div class="ctx-submenu-wrap" id="ctx-assignee-wrap">
+                <button class="ctx-has-sub">Verantwortlichen &auml;ndern &#9656;</button>
+                <div class="ctx-submenu" id="ctx-assignee-sub"></div>
+            </div>
+            <div class="ctx-submenu-wrap" id="ctx-labels-wrap" style="display:none">
+                <button class="ctx-has-sub">Label entfernen &#9656;</button>
+                <div class="ctx-submenu" id="ctx-labels-sub"></div>
+            </div>
+            <div class="ctx-submenu-wrap" id="ctx-addlabel-wrap" style="display:none">
+                <button class="ctx-has-sub">Label hinzuf&uuml;gen &#9656;</button>
+                <div class="ctx-submenu" id="ctx-addlabel-sub"></div>
+            </div>
+            <button onclick="ctxAction('editDue')">F&auml;lligkeitsdatum &auml;ndern</button>
+            <div class="ctx-separator"></div>
+            <button onclick="ctxAction('duplicate')">Duplizieren</button>
+            <button onclick="ctxAction('openTodoist')">In Todoist &ouml;ffnen</button>
+            <div class="ctx-separator"></div>
+            <button class="ctx-danger" onclick="ctxAction('delete')">L&ouml;schen</button>
+        </div>
+
+        <!-- View Name Dialog -->
+        <div id="view-name-dialog" class="modal-overlay hidden" onclick="if(event.target===this)closeViewNameDialog()">
+            <div class="modal-card">
+                <h3>Ansicht speichern</h3>
+                <input type="text" id="view-name-input" placeholder="Name der Ansicht..." maxlength="20">
+                <div class="modal-actions">
+                    <button class="btn-small" onclick="closeViewNameDialog()">Abbrechen</button>
+                    <button class="btn-small btn-success" onclick="confirmSaveView()">Speichern</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Due Date Dialog -->
+        <div id="due-dialog" class="modal-overlay hidden" onclick="if(event.target===this)closeDueDialog()">
+            <div class="modal-card">
+                <h3>F&auml;lligkeitsdatum</h3>
+                <input type="date" id="due-date-input">
+                <div class="modal-actions">
+                    <button class="btn-small" onclick="closeDueDialog()">Abbrechen</button>
+                    <button class="btn-small btn-danger" onclick="saveDueDate(null)">Entfernen</button>
+                    <button class="btn-small btn-success" onclick="saveDueDate(document.getElementById('due-date-input').value)">Speichern</button>
+                </div>
+            </div>
         </div>
 
         <!-- Toast -->
-        <div id="toast" class="toast hidden"></div>
+        <div id="toast" class="toast hidden">
+            <span id="toast-msg"></span>
+            <button id="toast-undo" class="toast-undo hidden" onclick="executeUndo()">R&uuml;ckg&auml;ngig</button>
+        </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/ui/toast.js"></script>
+    <script src="js/ui/table.js"></script>
+    <script src="js/ui/filters.js"></script>
+    <script src="js/ui/dialogs.js"></script>
+    <script src="js/ui/menus.js"></script>
+    <script src="js/actions.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>
