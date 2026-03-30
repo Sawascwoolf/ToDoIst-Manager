@@ -6,42 +6,41 @@ async function ctxAction(action, value) {
     const task = S.allTasks.find(t => t.id === id);
     try {
         if (action === 'complete') {
-            await api('POST', `/tasks/${id}/close`);
+            await syncCommand('item_complete', { id });
             updateTaskStatusLocally(id, 'completed');
             showToast('Erledigt.', 'success', async () => {
-                await api('POST', `/tasks/${id}/reopen`);
+                await syncCommand('item_uncomplete', { id });
                 updateTaskStatusLocally(id, 'open');
                 applyFilters();
             });
         } else if (action === 'reopen') {
-            await api('POST', `/tasks/${id}/reopen`);
+            await syncCommand('item_uncomplete', { id });
             updateTaskStatusLocally(id, 'open');
             showToast('Wieder geöffnet.', 'success', async () => {
-                await api('POST', `/tasks/${id}/close`);
+                await syncCommand('item_complete', { id });
                 updateTaskStatusLocally(id, 'completed');
                 applyFilters();
             });
         } else if (action === 'priority') {
             const oldPrio = task ? task.priority : null;
-            await api('POST', `/tasks/${id}`, { priority: value });
+            await syncCommand('item_update', { id, priority: value });
             if (task) task.priority = value;
             invalidateCache(S.currentProjectId);
             showToast(`Priorität → ${PRIO[value]}`, 'success', oldPrio != null ? async () => {
-                await api('POST', `/tasks/${id}`, { priority: oldPrio });
+                await syncCommand('item_update', { id, priority: oldPrio });
                 if (task) task.priority = oldPrio;
                 invalidateCache(S.currentProjectId);
                 applyFilters();
             } : null);
         } else if (action === 'assignee') {
-            const oldUid = task ? (task.responsible_uid || task.responsibleUid || task.assignee_id || task.assigneeId || null) : null;
-            const body = value ? { responsible_uid: value } : { responsible_uid: null };
-            await api('POST', `/tasks/${id}`, body);
-            if (task) { task.responsible_uid = value; task.responsibleUid = value; task.assignee_id = value; }
+            const oldUid = task ? (task.responsible_uid || null) : null;
+            await syncCommand('item_update', { id, responsible_uid: value || null });
+            if (task) task.responsible_uid = value;
             invalidateCache(S.currentProjectId);
             const name = value ? (S.collaborators[value] || value) : 'Niemand';
             showToast(`Verantwortlich: ${name}`, 'success', async () => {
-                await api('POST', `/tasks/${id}`, { responsible_uid: oldUid });
-                if (task) { task.responsible_uid = oldUid; task.responsibleUid = oldUid; task.assignee_id = oldUid; }
+                await syncCommand('item_update', { id, responsible_uid: oldUid });
+                if (task) task.responsible_uid = oldUid;
                 invalidateCache(S.currentProjectId);
                 applyFilters();
             });
@@ -49,11 +48,11 @@ async function ctxAction(action, value) {
             if (!task) return;
             const oldLabels = [...(task.labels || [])];
             const newLabels = oldLabels.filter(l => l !== value);
-            await api('POST', `/tasks/${id}`, { labels: newLabels });
+            await syncCommand('item_update', { id, labels: newLabels });
             task.labels = newLabels;
             invalidateCache(S.currentProjectId);
             showToast(`Label "${value}" entfernt.`, 'success', async () => {
-                await api('POST', `/tasks/${id}`, { labels: oldLabels });
+                await syncCommand('item_update', { id, labels: oldLabels });
                 task.labels = oldLabels;
                 invalidateCache(S.currentProjectId);
                 applyFilters();
@@ -64,11 +63,11 @@ async function ctxAction(action, value) {
             const oldLabels = [...(task.labels || [])];
             if (oldLabels.includes(value)) { showToast(`Label "${value}" bereits vorhanden.`, 'error'); return; }
             const newLabels = [...oldLabels, value];
-            await api('POST', `/tasks/${id}`, { labels: newLabels });
+            await syncCommand('item_update', { id, labels: newLabels });
             task.labels = newLabels;
             invalidateCache(S.currentProjectId);
             showToast(`Label "${value}" hinzugefügt.`, 'success', async () => {
-                await api('POST', `/tasks/${id}`, { labels: oldLabels });
+                await syncCommand('item_update', { id, labels: oldLabels });
                 task.labels = oldLabels;
                 invalidateCache(S.currentProjectId);
                 applyFilters();
@@ -83,7 +82,7 @@ async function ctxAction(action, value) {
             if (!task) return;
             showConfirmDialog('Aufgabe löschen', `"${task.content}" wirklich löschen?`, 'Löschen', async () => {
                 try {
-                    await api('DELETE', `/tasks/${id}`);
+                    await syncCommand('item_delete', { id });
                     S.allTasks = S.allTasks.filter(t => t.id !== id);
                     invalidateCache(S.currentProjectId);
                     showToast('Aufgabe gelöscht.', 'success');
@@ -93,13 +92,12 @@ async function ctxAction(action, value) {
             return;
         } else if (action === 'duplicate') {
             if (!task) return;
-            const body = { content: task.content, project_id: S.currentProjectId, priority: task.priority };
-            if (task.description) body.description = task.description;
-            if (task.labels && task.labels.length) body.labels = task.labels;
-            if (task.due) body.due_date = task.due.date;
-            if (task.parent_id || task.parentId) body.parent_id = task.parent_id || task.parentId;
-            if (task.section_id || task.sectionId) body.section_id = task.section_id || task.sectionId;
-            await api('POST', '/tasks', body);
+            const args = { content: task.content, project_id: S.currentProjectId, priority: task.priority };
+            if (task.labels && task.labels.length) args.labels = task.labels;
+            if (task.parent_id) args.parent_id = task.parent_id;
+            if (task.section_id) args.section_id = task.section_id;
+            const cmd = { type: 'item_add', uuid: generateUUID(), temp_id: generateUUID(), args };
+            await syncWrite([cmd]);
             invalidateCache(S.currentProjectId);
             await loadTasks(true);
             showToast('Aufgabe dupliziert.', 'success');
@@ -117,18 +115,18 @@ async function toggleTaskStatus(taskId, cb) {
     const was = !cb.checked;
     try {
         if (cb.checked) {
-            await api('POST', `/tasks/${taskId}/close`);
+            await syncCommand('item_complete', { id: taskId });
             updateTaskStatusLocally(taskId, 'completed');
             showToast('Erledigt.', 'success', async () => {
-                await api('POST', `/tasks/${taskId}/reopen`);
+                await syncCommand('item_uncomplete', { id: taskId });
                 updateTaskStatusLocally(taskId, 'open');
                 applyFilters();
             });
         } else {
-            await api('POST', `/tasks/${taskId}/reopen`);
+            await syncCommand('item_uncomplete', { id: taskId });
             updateTaskStatusLocally(taskId, 'open');
             showToast('Wieder geöffnet.', 'success', async () => {
-                await api('POST', `/tasks/${taskId}/close`);
+                await syncCommand('item_complete', { id: taskId });
                 updateTaskStatusLocally(taskId, 'completed');
                 applyFilters();
             });
@@ -163,18 +161,17 @@ function updateSelectionUI() {
     document.getElementById('select-all').checked = S.filteredTasks.length > 0 && n === S.filteredTasks.length;
 }
 
-// ── Bulk Actions ──
+// ── Bulk Actions (batched via Sync API) ──
 async function reopenSelected() {
     if (!S.selectedIds.size) return;
     const ids = [...S.selectedIds];
-    const { completed, failed } = await parallelLimit(
-        ids.map(id => () => api('POST', `/tasks/${id}/reopen`)), 5,
-        (d, t) => showProgress(d, t, 'Unerledigt'));
-    hideProgress();
+    const cmds = ids.map(id => ({ type: 'item_uncomplete', uuid: generateUUID(), args: { id } }));
+    const { ok, failed } = await syncBatchCommands(cmds);
     ids.forEach(id => updateTaskStatusLocally(id, 'open'));
-    const msg = failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als unerledigt markiert.`;
+    const msg = failed ? `${ok} ok, ${failed} Fehler.` : `${ok} als unerledigt markiert.`;
     showToast(msg, failed ? 'error' : 'success', !failed ? async () => {
-        await parallelLimit(ids.map(id => () => api('POST', `/tasks/${id}/close`)), 5);
+        const undoCmds = ids.map(id => ({ type: 'item_complete', uuid: generateUUID(), args: { id } }));
+        await syncBatchCommands(undoCmds);
         ids.forEach(id => updateTaskStatusLocally(id, 'completed'));
         applyFilters();
     } : null);
@@ -185,14 +182,13 @@ async function reopenSelected() {
 async function completeSelected() {
     if (!S.selectedIds.size) return;
     const ids = [...S.selectedIds];
-    const { completed, failed } = await parallelLimit(
-        ids.map(id => () => api('POST', `/tasks/${id}/close`)), 5,
-        (d, t) => showProgress(d, t, 'Erledigt'));
-    hideProgress();
+    const cmds = ids.map(id => ({ type: 'item_complete', uuid: generateUUID(), args: { id } }));
+    const { ok, failed } = await syncBatchCommands(cmds);
     ids.forEach(id => updateTaskStatusLocally(id, 'completed'));
-    const msg = failed ? `${completed} ok, ${failed} Fehler.` : `${completed} als erledigt markiert.`;
+    const msg = failed ? `${ok} ok, ${failed} Fehler.` : `${ok} als erledigt markiert.`;
     showToast(msg, failed ? 'error' : 'success', !failed ? async () => {
-        await parallelLimit(ids.map(id => () => api('POST', `/tasks/${id}/reopen`)), 5);
+        const undoCmds = ids.map(id => ({ type: 'item_uncomplete', uuid: generateUUID(), args: { id } }));
+        await syncBatchCommands(undoCmds);
         ids.forEach(id => updateTaskStatusLocally(id, 'open'));
         applyFilters();
     } : null);
@@ -200,21 +196,20 @@ async function completeSelected() {
     applyFilters();
 }
 
-// ── Bulk: Priority ──
+// ── Bulk: Priority (1 batched call) ──
 async function bulkSetPriority(prio) {
     hideListMenu();
     if (!S.selectedIds.size) return;
     const ids = [...S.selectedIds];
     const oldPrios = {};
     ids.forEach(id => { const t = S.allTasks.find(x => x.id === id); if (t) oldPrios[id] = t.priority; });
-    const { completed, failed } = await parallelLimit(
-        ids.map(id => () => api('POST', `/tasks/${id}`, { priority: prio })), 5,
-        (d, t) => showProgress(d, t, 'Priorität'));
-    hideProgress();
+    const cmds = ids.map(id => ({ type: 'item_update', uuid: generateUUID(), args: { id, priority: prio } }));
+    const { ok, failed } = await syncBatchCommands(cmds);
     ids.forEach(id => { const t = S.allTasks.find(x => x.id === id); if (t) t.priority = prio; });
     invalidateCache(S.currentProjectId);
-    showToast(`${completed} → ${PRIO[prio]}`, failed ? 'error' : 'success', !failed ? async () => {
-        await parallelLimit(ids.map(id => () => api('POST', `/tasks/${id}`, { priority: oldPrios[id] || 1 })), 5);
+    showToast(`${ok} → ${PRIO[prio]}`, failed ? 'error' : 'success', !failed ? async () => {
+        const undoCmds = ids.map(id => ({ type: 'item_update', uuid: generateUUID(), args: { id, priority: oldPrios[id] || 1 } }));
+        await syncBatchCommands(undoCmds);
         ids.forEach(id => { const t = S.allTasks.find(x => x.id === id); if (t) t.priority = oldPrios[id] || 1; });
         invalidateCache(S.currentProjectId);
         applyFilters();
@@ -223,44 +218,42 @@ async function bulkSetPriority(prio) {
     applyFilters();
 }
 
-// ── Bulk: Assignee ──
+// ── Bulk: Assignee (1 batched call) ──
 async function bulkSetAssignee(uid) {
     hideListMenu();
     if (!S.selectedIds.size) return;
     const ids = [...S.selectedIds];
-    const body = uid ? { responsible_uid: uid } : { responsible_uid: null };
-    const { completed, failed } = await parallelLimit(
-        ids.map(id => () => api('POST', `/tasks/${id}`, body)), 5,
-        (d, t) => showProgress(d, t, 'Verantwortlich'));
-    hideProgress();
+    const cmds = ids.map(id => ({ type: 'item_update', uuid: generateUUID(), args: { id, responsible_uid: uid || null } }));
+    const { ok, failed } = await syncBatchCommands(cmds);
     ids.forEach(id => {
         const t = S.allTasks.find(x => x.id === id);
-        if (t) { t.responsible_uid = uid; t.responsibleUid = uid; t.assignee_id = uid; }
+        if (t) t.responsible_uid = uid;
     });
     invalidateCache(S.currentProjectId);
     const name = uid ? (S.collaborators[uid] || uid) : 'Niemand';
-    showToast(`${completed} → ${name}`, failed ? 'error' : 'success');
+    showToast(`${ok} → ${name}`, failed ? 'error' : 'success');
     S.selectedIds.clear();
     applyFilters();
 }
 
-// ── Bulk: Add Label ──
+// ── Bulk: Add Label (1 batched call) ──
 async function bulkAddLabel(label) {
     hideListMenu();
     if (!label || !label.trim() || !S.selectedIds.size) return;
     label = label.trim();
     const ids = [...S.selectedIds];
-    const { completed, failed } = await parallelLimit(
-        ids.map(id => () => {
-            const t = S.allTasks.find(x => x.id === id);
-            if (!t) return Promise.resolve();
-            const newLabels = [...new Set([...(t.labels || []), label])];
-            return api('POST', `/tasks/${id}`, { labels: newLabels }).then(() => { t.labels = newLabels; });
-        }), 5,
-        (d, t) => showProgress(d, t, 'Label'));
-    hideProgress();
+    const cmds = ids.map(id => {
+        const t = S.allTasks.find(x => x.id === id);
+        const newLabels = [...new Set([...(t ? t.labels || [] : []), label])];
+        return { type: 'item_update', uuid: generateUUID(), args: { id, labels: newLabels } };
+    });
+    const { ok, failed } = await syncBatchCommands(cmds);
+    ids.forEach(id => {
+        const t = S.allTasks.find(x => x.id === id);
+        if (t) t.labels = [...new Set([...(t.labels || []), label])];
+    });
     invalidateCache(S.currentProjectId);
-    showToast(`${completed} → Label "${label}"`, failed ? 'error' : 'success');
+    showToast(`${ok} → Label "${label}"`, failed ? 'error' : 'success');
     S.selectedIds.clear();
     applyFilters();
 }

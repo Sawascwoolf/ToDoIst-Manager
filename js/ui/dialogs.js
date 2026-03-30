@@ -168,12 +168,13 @@ async function confirmCreateTask() {
     closeCreateTaskDialog();
 
     try {
-        const body = { content, project_id: S.currentProjectId, priority };
-        if (parentId) body.parent_id = parentId;
-        if (assignee) body.responsible_uid = assignee;
-        if (labels.length) body.labels = labels;
+        const args = { content, project_id: S.currentProjectId, priority };
+        if (parentId) args.parent_id = parentId;
+        if (assignee) args.responsible_uid = assignee;
+        if (labels.length) args.labels = labels;
 
-        await api('POST', '/tasks', body);
+        const cmd = { type: 'item_add', uuid: generateUUID(), temp_id: generateUUID(), args };
+        await syncWrite([cmd]);
         invalidateCache(S.currentProjectId);
         await loadTasks(true);
         showToast('Aufgabe erstellt.', 'success');
@@ -202,7 +203,8 @@ async function confirmMoveTask(newParentId) {
     closeMoveDialog();
     if (!id) return;
     try {
-        await api('POST', `/tasks/${id}`, { parent_id: newParentId || null });
+        const moveArgs = newParentId ? { id, parent_id: newParentId } : { id, project_id: S.currentProjectId };
+        await syncCommand('item_move', moveArgs);
         const task = S.allTasks.find(t => t.id === id);
         if (task) { task.parent_id = newParentId; task.parentId = newParentId; }
         invalidateCache(S.currentProjectId);

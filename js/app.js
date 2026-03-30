@@ -28,33 +28,24 @@ async function connect() {
     mainErr.classList.add('hidden');
 
     try {
-        const r = await fetch(`${API_BASE}/projects`, { headers: { 'Authorization': `Bearer ${S.token}` } });
-        if (!r.ok) {
-            const body = await r.text().catch(() => '');
-            const msg = r.status === 401 || r.status === 403
-                ? `Token ungültig (HTTP ${r.status}).`
-                : r.status === 410
-                ? `API v1 nicht erreichbar (HTTP 410). API-Version hat sich möglicherweise geändert.`
-                : `API-Fehler HTTP ${r.status}: ${body.substring(0, 150)}`;
-            err.textContent = msg; err.classList.remove('hidden');
-            mainErr.textContent = msg; mainErr.classList.remove('hidden');
-            return;
-        }
-        const data = await r.json();
-        const projects = data.results || data;
+        // Use Sync API to load projects (1 call instead of paginated REST)
+        const data = await syncRead(['projects'], true);
+        const projects = data.projects || [];
+        if (!projects.length) throw new Error('Keine Projekte gefunden.');
+
         const sel = document.getElementById('project-select');
         sel.innerHTML = '<option value="">Projekt wählen...</option>';
-        projects.forEach(p => { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o); });
+        projects.filter(p => !p.is_deleted && !p.is_archived).forEach(p => {
+            const o = document.createElement('option');
+            o.value = p.id; o.textContent = p.name; sel.appendChild(o);
+        });
         sel.disabled = false;
         localStorage.setItem('todoist_token', S.token);
-        // Restore last project
+
         const lastPid = localStorage.getItem('todoist_last_project');
         if (lastPid) {
             const match = [...sel.options].find(o => String(o.value) === String(lastPid));
-            if (match) {
-                sel.value = match.value;
-                loadTasks();
-            }
+            if (match) { sel.value = match.value; loadTasks(); }
         }
         showToast(`${projects.length} Projekte geladen.`, 'success');
         if (document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
@@ -91,18 +82,22 @@ async function loadTasks(force) {
     document.getElementById('task-body').innerHTML = '';
 
     try {
-        const [open, completed, secList, collabList] = await Promise.all([
-            apiPaginated(`/tasks?project_id=${pid}`),
-            fetchAllCompleted(pid),
-            apiPaginated(`/sections?project_id=${pid}`),
-            apiPaginated(`/projects/${pid}/collaborators`).catch(() => []),
-        ]);
+        // Sync API: 1 call for open tasks + sections + collaborators
+        const syncData = await syncRead(['items', 'sections', 'collaborators'], true);
+        const allItems = syncData.items || [];
+        const open = allItems.filter(t => !t.is_completed && !t.is_deleted && String(t.project_id) === String(pid));
         open.forEach(t => { t._status = 'open'; });
 
+        // Completed tasks via REST (Sync API doesn't include them)
+        const completed = await fetchAllCompleted(pid);
+
+        const secList = (syncData.sections || []).filter(s => String(s.project_id) === String(pid) && !s.is_deleted);
+        const collabList = syncData.collaborators || [];
+
         const secs = {}; secList.forEach(s => { secs[s.id] = s.name; }); S.sections = secs;
-        const cols = {}; collabList.forEach(c => { cols[c.id] = c.name || c.email || c.id; });
+        const cols = {}; collabList.forEach(c => { cols[c.id] = c.full_name || c.name || c.email || c.id; });
         [...open, ...completed].forEach(t => {
-            const uid = t.responsible_uid || t.responsibleUid || t.assignee_id || t.assigneeId;
+            const uid = t.responsible_uid;
             if (uid && !cols[uid]) cols[uid] = uid;
         });
         S.collaborators = cols;
@@ -120,6 +115,51 @@ async function loadTasks(force) {
     }
 }
 
+// ── Delta Refresh (incremental sync) ──
+async function deltaRefresh() {
+    if (!S.currentProjectId || !S.syncToken) return;
+    try {
+        const data = await syncRead(['items', 'sections', 'collaborators'], false);
+        if (data.full_sync) {
+            // Server forced full sync, do a full reload
+            invalidateCache(S.currentProjectId);
+            await loadTasks(true);
+            return;
+        }
+        const changedItems = data.items || [];
+        const pid = S.currentProjectId;
+        if (changedItems.length === 0 && !(data.sections || []).length) return; // nothing changed
+
+        // Apply changes to local state
+        changedItems.forEach(item => {
+            if (String(item.project_id) !== String(pid)) return;
+            const idx = S.allTasks.findIndex(t => t.id === item.id);
+            if (item.is_deleted) {
+                if (idx >= 0) S.allTasks.splice(idx, 1);
+            } else if (idx >= 0) {
+                Object.assign(S.allTasks[idx], item);
+                S.allTasks[idx]._status = item.is_completed ? 'completed' : 'open';
+            } else if (!item.is_completed) {
+                item._status = 'open';
+                S.allTasks.push(item);
+            }
+        });
+
+        // Update sections
+        if (data.sections) {
+            data.sections.filter(s => String(s.project_id) === String(pid)).forEach(s => {
+                if (s.is_deleted) delete S.sections[s.id];
+                else S.sections[s.id] = s.name;
+            });
+        }
+
+        invalidateCache(pid);
+        applyFilters();
+    } catch (e) {
+        console.error('Delta refresh error:', e);
+    }
+}
+
 function showUI() {
     try {
         populateAssigneeToggles();
@@ -133,17 +173,16 @@ function showUI() {
     }
 }
 
-// ── Auto-Refresh ──
-const AUTO_REFRESH_INTERVAL = 60 * 1000; // 60 seconds
+// ── Auto-Refresh (delta sync) ──
+const AUTO_REFRESH_INTERVAL = 60 * 1000;
 let autoRefreshTimer = null;
 
 function startAutoRefresh() {
     stopAutoRefresh();
     autoRefreshTimer = setInterval(() => {
         if (!S.currentProjectId) return;
-        if (document.hidden) return; // Don't refresh when tab is hidden
-        invalidateCache(S.currentProjectId);
-        loadTasks(true);
+        if (document.hidden) return;
+        deltaRefresh();
     }, AUTO_REFRESH_INTERVAL);
 }
 
@@ -152,10 +191,7 @@ function stopAutoRefresh() {
 }
 
 document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && S.currentProjectId) {
-        invalidateCache(S.currentProjectId);
-        loadTasks(true);
-    }
+    if (!document.hidden && S.currentProjectId) deltaRefresh();
 });
 
 // ── Init ──

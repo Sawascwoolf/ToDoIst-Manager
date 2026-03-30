@@ -15,6 +15,7 @@ const S = {
     groupBySection: true,
     showHierarchy: true,
     searchExtraTasks: [],
+    syncToken: null,
 };
 
 // ── View Configs (5 slots, persisted in localStorage) ──
