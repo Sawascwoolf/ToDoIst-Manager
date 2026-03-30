@@ -138,6 +138,7 @@ document.getElementById('view-name-input').addEventListener('keydown', e => { if
 bindToggleButtons();
 renderViewSlots();
 updateGroupToggleUI();
+updateHierarchyToggleUI();
 
 (function () {
     const t = localStorage.getItem('todoist_token');

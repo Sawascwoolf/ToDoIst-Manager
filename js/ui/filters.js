@@ -149,7 +149,11 @@ function applyFilters() {
     }
 
     sortTasks();
-    S.filteredTasks = buildHierarchy(S.filteredTasks);
+    if (S.showHierarchy) {
+        S.filteredTasks = buildHierarchy(S.filteredTasks);
+    } else {
+        S.filteredTasks.forEach(t => { t._depth = 0; t._hasChildren = false; });
+    }
     S.selectedIds.clear();
     document.getElementById('select-all').checked = false;
     updateSelectionUI();
@@ -164,7 +168,10 @@ function sortBy(field) {
     const ths = document.querySelectorAll('th.sortable');
     const idx = ['content', 'priority', 'due', 'assignee'].indexOf(field);
     if (idx >= 0 && ths[idx]) ths[idx].classList.add(S.sortAsc ? 'sort-asc' : 'sort-desc');
-    sortTasks(); S.filteredTasks = buildHierarchy(S.filteredTasks); renderTable();
+    sortTasks();
+    if (S.showHierarchy) S.filteredTasks = buildHierarchy(S.filteredTasks);
+    else S.filteredTasks.forEach(t => { t._depth = 0; t._hasChildren = false; });
+    renderTable();
 }
 
 function sortTasks() {
@@ -188,13 +195,18 @@ function toggleGrouping() {
     renderTable();
 }
 
-// Bind grouping button explicitly (in case onclick is overridden)
+function toggleHierarchy() {
+    S.showHierarchy = !S.showHierarchy;
+    updateHierarchyToggleUI();
+    applyFilters();
+}
+
+// Bind toggle buttons via JS
 (function() {
-    const btn = document.getElementById('group-toggle');
-    if (btn) btn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        toggleGrouping();
-    });
+    const gb = document.getElementById('group-toggle');
+    if (gb) gb.addEventListener('click', function(e) { e.stopPropagation(); toggleGrouping(); });
+    const hb = document.getElementById('hierarchy-toggle');
+    if (hb) hb.addEventListener('click', function(e) { e.stopPropagation(); toggleHierarchy(); });
 })();
 
 // ── View Configs ──

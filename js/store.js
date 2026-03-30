@@ -13,6 +13,7 @@ const S = {
     currentProjectId: null,
     undoFn: null,
     groupBySection: true,
+    showHierarchy: true,
     searchExtraTasks: [],
 };
 
@@ -39,6 +40,7 @@ function captureCurrentView() {
         sortField: S.sortField,
         sortAsc: S.sortAsc,
         groupBySection: S.groupBySection,
+        showHierarchy: S.showHierarchy,
     };
 }
 
@@ -53,6 +55,7 @@ function restoreView(cfg) {
     S.sortField = cfg.sortField || 'content';
     S.sortAsc = cfg.sortAsc !== false;
     S.groupBySection = cfg.groupBySection !== false;
+    S.showHierarchy = cfg.showHierarchy !== false;
 
     document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
     const ths = document.querySelectorAll('th.sortable');
@@ -60,6 +63,7 @@ function restoreView(cfg) {
     if (idx >= 0 && ths[idx]) ths[idx].classList.add(S.sortAsc ? 'sort-asc' : 'sort-desc');
 
     updateGroupToggleUI();
+    updateHierarchyToggleUI();
     applyFilters();
 }
 
@@ -72,6 +76,11 @@ function setToggles(containerId, values) {
 function updateGroupToggleUI() {
     const btn = document.getElementById('group-toggle');
     if (btn) btn.classList.toggle('active', S.groupBySection);
+}
+
+function updateHierarchyToggleUI() {
+    const btn = document.getElementById('hierarchy-toggle');
+    if (btn) btn.classList.toggle('active', S.showHierarchy);
 }
 
 // ── Cache ──
