@@ -36,7 +36,7 @@
                 <option value="">Verbinde...</option>
             </select>
             <div id="stats-top" class="stats"></div>
-            <div class="build-badge">Build #30</div>
+            <div class="build-badge">Build #31</div>
         </div>
         <div id="main-error" class="main-error hidden"></div>
 
@@ -181,10 +181,8 @@
                 <div class="ctx-submenu" id="ctx-addlabel-sub"></div>
             </div>
             <div class="ctx-separator"></div>
-            <div class="ctx-submenu-wrap" id="ctx-parent-wrap">
-                <button class="ctx-has-sub">Verschieben &#9656;</button>
-                <div class="ctx-submenu" id="ctx-parent-sub"></div>
-            </div>
+            <button onclick="ctxAction('addSubtask')">Unteraufgabe hinzuf&uuml;gen</button>
+            <button onclick="ctxAction('move')">Verschieben...</button>
             <button onclick="ctxAction('duplicate')">Duplizieren</button>
             <button onclick="ctxAction('openTodoist')">In Todoist &ouml;ffnen</button>
             <div class="ctx-separator"></div>
@@ -231,13 +229,41 @@
                         </select>
                     </div>
                     <div class="create-task-row">
+                        <label>Verantwortlich</label>
+                        <select id="new-task-assignee"></select>
+                    </div>
+                    <div class="create-task-row create-task-row-full">
+                        <label>Labels</label>
+                        <div class="label-picker" id="new-task-labels"></div>
+                    </div>
+                    <div class="create-task-row create-task-row-full">
                         <label>&Uuml;bergeordnet</label>
-                        <select id="new-task-parent"></select>
+                        <div class="task-picker" id="new-task-parent-picker">
+                            <input type="text" id="new-task-parent-search" placeholder="Suchen..." oninput="filterTaskPicker('new-task-parent')">
+                            <input type="hidden" id="new-task-parent">
+                            <div class="task-picker-selected" id="new-task-parent-selected">(Keine &ndash; oberste Ebene)</div>
+                            <div class="task-picker-list" id="new-task-parent-list"></div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-actions">
                     <button class="btn-small" onclick="closeCreateTaskDialog()">Abbrechen</button>
                     <button class="btn-small btn-success" onclick="confirmCreateTask()">Erstellen</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Move Task Dialog -->
+        <div id="move-dialog" class="modal-overlay hidden" onclick="if(event.target===this)closeMoveDialog()">
+            <div class="modal-card modal-card-wide">
+                <h3>Verschieben</h3>
+                <div class="task-picker" id="move-task-picker">
+                    <input type="text" id="move-task-search" placeholder="Aufgabe suchen..." oninput="filterTaskPicker('move-task')" autofocus>
+                    <div class="task-picker-list" id="move-task-list"></div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-small" onclick="closeMoveDialog()">Abbrechen</button>
+                    <button class="btn-small btn-success" onclick="confirmMoveTask(null)">&#8593; Oberste Ebene</button>
                 </div>
             </div>
         </div>

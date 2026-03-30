@@ -110,6 +110,7 @@ async function loadTasks(force) {
         taskCache[pid] = { open, completed, sections: secs, collaborators: cols, ts: Date.now() };
         S.allTasks = deduplicateTasks(open, completed);
         showUI();
+        startAutoRefresh();
         showToast(`${open.length} offen + ${completed.length} erledigt.`, 'success');
     } catch (e) {
         console.error('loadTasks error:', e);
@@ -131,6 +132,31 @@ function showUI() {
         throw e;
     }
 }
+
+// ── Auto-Refresh ──
+const AUTO_REFRESH_INTERVAL = 60 * 1000; // 60 seconds
+let autoRefreshTimer = null;
+
+function startAutoRefresh() {
+    stopAutoRefresh();
+    autoRefreshTimer = setInterval(() => {
+        if (!S.currentProjectId) return;
+        if (document.hidden) return; // Don't refresh when tab is hidden
+        invalidateCache(S.currentProjectId);
+        loadTasks(true);
+    }, AUTO_REFRESH_INTERVAL);
+}
+
+function stopAutoRefresh() {
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && S.currentProjectId) {
+        invalidateCache(S.currentProjectId);
+        loadTasks(true);
+    }
+});
 
 // ── Init ──
 document.getElementById('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });

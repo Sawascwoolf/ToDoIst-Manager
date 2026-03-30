@@ -73,14 +73,11 @@ async function ctxAction(action, value) {
                 invalidateCache(S.currentProjectId);
                 applyFilters();
             });
-        } else if (action === 'moveToParent') {
-            const oldParent = task ? (task.parent_id || task.parentId || null) : null;
-            await api('POST', `/tasks/${id}`, { parent_id: value || null });
-            if (task) { task.parent_id = value; task.parentId = value; }
-            invalidateCache(S.currentProjectId);
-            await loadTasks(true);
-            const targetName = value ? (S.allTasks.find(t => t.id === value)?.content || value) : 'Oberste Ebene';
-            showToast(`Verschoben → ${targetName}`, 'success');
+        } else if (action === 'addSubtask') {
+            openCreateTaskDialog(id);
+            return;
+        } else if (action === 'move') {
+            openMoveDialog(id);
             return;
         } else if (action === 'confirmDelete') {
             if (!task) return;
