@@ -109,6 +109,9 @@ async function loadTasks(force) {
 
         taskCache[pid] = { open, completed, sections: secs, collaborators: cols, ts: Date.now() };
         S.allTasks = deduplicateTasks(open, completed);
+
+        // Fill hierarchy gaps: fetch missing parents/children
+        await fillHierarchyGaps();
         showUI();
         startAutoRefresh();
         showToast(`${open.length} offen + ${completed.length} erledigt.`, 'success');
@@ -117,6 +120,62 @@ async function loadTasks(force) {
         showToast('Fehler: ' + e.message, 'error');
     } finally {
         document.getElementById('loading').classList.add('hidden');
+    }
+}
+
+async function fillHierarchyGaps() {
+    const knownIds = new Set(S.allTasks.map(t => t.id));
+    const missingIds = new Set();
+
+    // Find parent_ids that point to tasks not in our list
+    S.allTasks.forEach(t => {
+        const pid = t.parent_id || t.parentId;
+        if (pid && !knownIds.has(pid)) missingIds.add(pid);
+    });
+
+    if (missingIds.size === 0) return;
+
+    // Fetch missing tasks (could be completed parents or children)
+    const fetched = [];
+    await parallelLimit(
+        [...missingIds].map(id => async () => {
+            try {
+                const t = await api('GET', `/tasks/${id}`);
+                if (t) {
+                    t._status = t.is_completed ? 'completed' : 'open';
+                    fetched.push(t);
+                }
+            } catch { /* truly deleted, skip */ }
+        }),
+        10
+    );
+
+    if (fetched.length === 0) return;
+
+    // Add to allTasks and recurse (fetched parents may have their own parents)
+    fetched.forEach(t => {
+        if (!knownIds.has(t.id)) { S.allTasks.push(t); knownIds.add(t.id); }
+    });
+
+    // One more round for grandparents
+    const missingIds2 = new Set();
+    S.allTasks.forEach(t => {
+        const pid = t.parent_id || t.parentId;
+        if (pid && !knownIds.has(pid)) missingIds2.add(pid);
+    });
+    if (missingIds2.size > 0) {
+        await parallelLimit(
+            [...missingIds2].map(id => async () => {
+                try {
+                    const t = await api('GET', `/tasks/${id}`);
+                    if (t) {
+                        t._status = t.is_completed ? 'completed' : 'open';
+                        if (!knownIds.has(t.id)) { S.allTasks.push(t); knownIds.add(t.id); }
+                    }
+                } catch {}
+            }),
+            10
+        );
     }
 }
 
