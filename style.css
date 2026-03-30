@@ -88,7 +88,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .btn-view-save { font-size: 0.72rem !important; padding: 3px 8px !important; color: var(--success) !important; border-color: var(--success) !important; }
 .btn-view-save:hover { background: var(--success) !important; color: #fff !important; }
 .view-spacer { flex: 1; }
-#group-toggle { font-size: 0.72rem; padding: 3px 8px; }
+.group-toggle-btn { padding: 3px 10px; font-size: 0.72rem; font-weight: 500; border: 1px solid var(--border); border-radius: 3px; background: #fff; color: var(--text-muted); cursor: pointer; transition: all 0.12s; }
+.group-toggle-btn:hover { border-color: #aaa; }
+.group-toggle-btn.active { background: #333; color: #fff; border-color: #333; }
 
 /* ── Action Row ── */
 .action-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid #eee; }

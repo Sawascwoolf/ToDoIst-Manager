@@ -99,8 +99,8 @@ function showListMenu(e) {
     menu.style.top = rect.bottom + 4 + 'px';
     menu.style.left = left + 'px';
 
-    // Flip submenus left if needed
-    const openLeft = left + 200 + 140 > window.innerWidth;
+    // Flip submenus left if menu is in right half of screen
+    const openLeft = left + 220 > window.innerWidth / 2;
     menu.querySelectorAll('.ctx-submenu').forEach(s => s.classList.toggle('open-left', openLeft));
 }
 

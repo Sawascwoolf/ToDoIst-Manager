@@ -47,6 +47,12 @@ async function connect() {
         projects.forEach(p => { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o); });
         sel.disabled = false;
         localStorage.setItem('todoist_token', S.token);
+        // Restore last project
+        const lastPid = localStorage.getItem('todoist_last_project');
+        if (lastPid && [...sel.options].some(o => o.value === lastPid)) {
+            sel.value = lastPid;
+            loadTasks();
+        }
         showToast(`${projects.length} Projekte geladen.`, 'success');
         if (document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
     } catch (e) {
@@ -65,6 +71,7 @@ async function loadTasks(force) {
     const pid = document.getElementById('project-select').value;
     if (!pid) return;
     S.currentProjectId = pid;
+    localStorage.setItem('todoist_last_project', pid);
 
     if (!force) {
         const c = getCached(pid);
