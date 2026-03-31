@@ -2,7 +2,33 @@
 // Uses Todoist Sync API v1 for efficient reads and batched writes.
 // Stores sync_token for incremental updates (delta sync).
 
-const SYNC_URL = 'https://api.todoist.com/api/v1/sync';
+const SYNC_URLS = [
+    'https://api.todoist.com/sync/v9/sync',
+    'https://api.todoist.com/api/v1/sync',
+];
+let activeSyncUrl = null;
+
+async function findSyncUrl() {
+    if (activeSyncUrl) return activeSyncUrl;
+    for (const url of SYNC_URLS) {
+        try {
+            const params = new URLSearchParams();
+            params.set('sync_token', '*');
+            params.set('resource_types', '["user"]');
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${S.token}` },
+                body: params,
+            });
+            if (r.ok || r.status === 429) {
+                activeSyncUrl = url;
+                console.log('Sync API URL:', url);
+                return url;
+            }
+        } catch { /* try next */ }
+    }
+    throw new Error('Sync API nicht erreichbar. Prüfe Internetverbindung.');
+}
 
 function generateUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -18,7 +44,8 @@ async function syncRead(resourceTypes, forceFullSync) {
     params.set('sync_token', token);
     params.set('resource_types', JSON.stringify(resourceTypes));
 
-    const r = await fetch(SYNC_URL, {
+    const url = await findSyncUrl();
+    const r = await fetch(url, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${S.token}` },
         body: params,
@@ -31,7 +58,11 @@ async function syncRead(resourceTypes, forceFullSync) {
         return syncRead(resourceTypes, forceFullSync);
     }
 
-    if (!r.ok) throw new Error(`Sync API ${r.status}: ${await r.text()}`);
+    if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        console.error('Sync read failed:', r.status, body);
+        throw new Error(`Sync API ${r.status}: ${body.substring(0, 150)}`);
+    }
     const data = await r.json();
     S.syncToken = data.sync_token;
     return data;
@@ -48,7 +79,8 @@ async function syncWrite(commands) {
     params.set('resource_types', '["items"]');
     params.set('commands', JSON.stringify(commands));
 
-    const r = await fetch(SYNC_URL, {
+    const url = await findSyncUrl();
+    const r = await fetch(url, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${S.token}` },
         body: params,
@@ -61,7 +93,11 @@ async function syncWrite(commands) {
         return syncWrite(commands);
     }
 
-    if (!r.ok) throw new Error(`Sync API ${r.status}: ${await r.text()}`);
+    if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        console.error('Sync write failed:', r.status, body);
+        throw new Error(`Sync API ${r.status}: ${body.substring(0, 150)}`);
+    }
     const data = await r.json();
     S.syncToken = data.sync_token;
 
